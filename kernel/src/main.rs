@@ -313,11 +313,11 @@ pub extern "C" fn kernel_main() -> ! {
         input::CAPACITY
     );
 
-    // Line editor on top of that queue: type, backspace, enter to submit and
-    // see the whole line echoed back (roadmap 4.1). Banner first so the
-    // prompt is the last thing on screen, ready for typing.
+    // Shell on top of that queue: line editor + built-in commands (roadmap
+    // 4.1 / 4.2). Banner first so the prompt is the last thing on screen,
+    // ready for typing.
     diag_println!(
-        "Shell: line editor ({} chars, type/backspace/enter to echo)",
+        "Shell: line editor ({} chars) + builtins (help/clear/echo/about)",
         shell::LINE_CAPACITY
     );
     shell::init();
@@ -336,7 +336,7 @@ pub fn hlt_loop() -> ! {
 }
 
 /// Idles like [`hlt_loop`], but wakes on each IRQ to:
-/// - drain the keyboard input queue into the line editor (roadmap 4.1),
+/// - drain the keyboard input queue into the shell (roadmap 4.1 / 4.2),
 /// - report the PIT tick counter once per second (roadmap 3.1).
 fn idle_with_input() -> ! {
     let mut editor = shell::LineEditor::new();

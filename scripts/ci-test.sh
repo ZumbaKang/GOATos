@@ -404,9 +404,9 @@ if ! grep -qE "Input: [0-9]+-event ring buffer \(IRQ pushes, idle loop drains\)"
   status=1
 fi
 
-# Line editor (roadmap 4.1): prompt-ready after boot, fixed capacity reported.
-if ! grep -qE "Shell: line editor \([0-9]+ chars, type/backspace/enter to echo\)" "$LOG_FILE"; then
-  echo "FAIL: kernel did not report the shell line editor"
+# Shell (roadmap 4.1 / 4.2): line editor + built-in command dispatcher.
+if ! grep -qE "Shell: line editor \([0-9]+ chars\) \+ builtins \(help/clear/echo/about\)" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report the shell line editor / builtins"
   status=1
 fi
 
