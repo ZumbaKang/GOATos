@@ -253,6 +253,21 @@ pub fn trigger_debug_exception() {
         }
     }
 
+    #[cfg(feature = "trigger-double-fault-gate")]
+    {
+        diag_println!("DEBUG: taking vector 8 directly, to exercise the task gate...");
+        // Not a real double fault - a software interrupt through the same gate.
+        // It proves the task switch and the private stack, which is all that
+        // can be shown under emulators that don't implement escalating a
+        // failed exception delivery into a double fault (v86 aborts instead).
+        // The saved `eip` is therefore the instruction *after* the `int`, not a
+        // faulting one.
+        //
+        // SAFETY: vector 8's task gate is installed by `init`, and the task it
+        // switches to halts, so nothing after this runs.
+        unsafe { asm!("int $0x08", options(att_syntax)) };
+    }
+
     #[cfg(feature = "trigger-general-protection-fault")]
     {
         diag_println!("DEBUG: loading an out-of-range segment selector on purpose...");
