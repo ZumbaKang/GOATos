@@ -8,11 +8,21 @@
 //! emulated by every x86 emulator (notably: it hangs under v86).
 
 use core::fmt::Write;
+use core::hint;
 use spin::Mutex;
 use uart_16550::backend::PioBackend;
-use uart_16550::{Config, Uart16550};
+use uart_16550::{ByteSendError, Config, Uart16550};
 
 const COM1_PORT: u16 = 0x3f8;
+
+/// How long to keep offering a byte to a UART whose transmit register is
+/// still busy, before giving up on the rest of the message.
+///
+/// A real 16550 clears that within one character time (~1ms at 9600 baud),
+/// which this many spins comfortably outlasts on any CPU that can run this
+/// kernel. The bound exists so that a device which *never* drains can't turn
+/// a debug print into a hang.
+const TRANSMIT_SPIN_LIMIT: u32 = 1_000_000;
 
 static SERIAL1: Mutex<Option<Uart16550<PioBackend>>> = Mutex::new(None);
 
@@ -36,12 +46,51 @@ pub fn init() {
     *SERIAL1.lock() = Some(uart);
 }
 
+/// Writes as much of `bytes` as the UART will take, dropping the rest rather
+/// than waiting indefinitely for it.
+///
+/// This is deliberately not `Uart16550::send_bytes_exact`, which spins until
+/// the device reports itself ready to send - and "ready" includes the remote
+/// asserting CTS. QEMU does (its modem status register reads `0xb0`), but v86
+/// reports `0x00`: its transmit register is permanently empty and CTS never
+/// arrives, so `send_bytes_exact` there never returns. That wedged the whole
+/// kernel on the first serial print, silently, in the browser demo - the same
+/// class of failure that made this driver best-effort in the first place.
+fn send(uart: &mut Uart16550<PioBackend>, bytes: &[u8]) {
+    let mut remaining = bytes;
+    let mut spins = 0;
+
+    while !remaining.is_empty() {
+        match uart.ready_to_send() {
+            Ok(()) => match uart.send_bytes(remaining) {
+                0 => return,
+                sent => {
+                    remaining = &remaining[sent..];
+                    spins = 0;
+                }
+            },
+            // Still transmitting the previous byte: transient, worth waiting
+            // out - but not forever.
+            Err(ByteSendError::NoCapacity) => {
+                spins += 1;
+                if spins > TRANSMIT_SPIN_LIMIT {
+                    return;
+                }
+                hint::spin_loop();
+            }
+            // Nobody on the other end is doing hardware flow control, so
+            // waiting for it would never end. Give up on this message.
+            Err(ByteSendError::RemoteNotClearToSend) => return,
+        }
+    }
+}
+
 struct SerialWriter;
 
 impl Write for SerialWriter {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         if let Some(uart) = SERIAL1.lock().as_mut() {
-            uart.send_bytes_exact(s.as_bytes());
+            send(uart, s.as_bytes());
         }
         Ok(())
     }

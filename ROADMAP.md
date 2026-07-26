@@ -56,7 +56,7 @@ readable diagnostic, which makes every phase after it much faster to debug.
       `lidt` call to load it. No real handlers yet.
       *Done when:* the IDT loads without faulting (verify by loading it and
       still reaching the existing boot-confirmation output).
-- [ ] **1.3 - Core exception handlers.** Add handlers for divide error (0),
+- [x] **1.3 - Core exception handlers.** Add handlers for divide error (0),
       invalid opcode (6), and general protection fault (13) that print the
       vector number (and error code, where applicable) to VGA + serial,
       then halt - no recovery, just a readable crash.

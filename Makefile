@@ -20,6 +20,11 @@
 
 PROFILE ?= dev
 CARGO_PROFILE_FLAG := $(if $(filter release,$(PROFILE)),--release,)
+# Optional cargo features for the kernel crate, e.g.
+#   make run KERNEL_FEATURES=trigger-divide-error
+# to boot a kernel that deliberately faults (see kernel/Cargo.toml).
+KERNEL_FEATURES ?=
+CARGO_FEATURES_FLAG := $(if $(KERNEL_FEATURES),--features $(KERNEL_FEATURES),)
 # Cargo's built-in "dev" profile always outputs to a "debug" directory,
 # regardless of the profile's name; only custom profiles get their own dir.
 PROFILE_DIR := $(if $(filter dev,$(PROFILE)),debug,$(PROFILE))
@@ -40,7 +45,7 @@ MIN_DISK_SIZE_BYTES := 10485760 # 10 MiB
 all: kernel
 
 kernel:
-	cd kernel && cargo build $(CARGO_PROFILE_FLAG)
+	cd kernel && cargo build $(CARGO_PROFILE_FLAG) $(CARGO_FEATURES_FLAG)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
