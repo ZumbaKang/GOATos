@@ -86,6 +86,10 @@ right but the VGA output is garbled," for example.
   option and creates drafts, so `ci.yml`'s `ready-for-review` job marks
   `cursor/*` PRs in this repo ready automatically. Don't try to flip it by
   hand - just don't count on the PR still being a draft a minute later.
+  That job depends on the repo's `PR_READY_TOKEN` secret (the default
+  `GITHUB_TOKEN` cannot take a PR out of draft); if it reports the secret is
+  missing, the PR is tested but stays a draft, and only a human can unstick
+  it - say so in your final message rather than trying to work around it.
 
 From here, `.github/workflows/ci.yml` takes over: it takes the PR out of
 draft, builds the kernel, runs `cargo clippy`, runs the boot test, and -
