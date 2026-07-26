@@ -34,6 +34,11 @@ const PRESENT: u8 = 0b1000_0000;
 /// exceptions and PIC IRQs alike - wants that, so trap gates aren't offered
 /// until something actually needs one.
 const GATE_32BIT_INTERRUPT: u8 = 0xe;
+/// Gate type nibble for a task gate: instead of jumping to an offset in the
+/// current task, the CPU performs a full hardware task switch to the TSS the
+/// gate names - which is the only way, on 32-bit x86, for a handler to run on
+/// a stack of its own (see [`crate::tss`]).
+const GATE_TASK: u8 = 0x5;
 
 /// The registers the CPU pushes before entering a handler, in the order a
 /// handler sees them (lowest address first).
@@ -106,6 +111,19 @@ impl Gate {
             // vectors, not a future ring-3 `int n`.
             type_attr: PRESENT | GATE_32BIT_INTERRUPT,
             offset_high: (offset >> 16) as u16,
+        }
+    }
+
+    /// A ring-0 task gate naming `tss_selector`. The offset fields go unused:
+    /// where execution resumes comes from the TSS's saved `eip`, not from the
+    /// gate.
+    fn task(tss_selector: u16) -> Gate {
+        Gate {
+            offset_low: 0,
+            selector: tss_selector,
+            reserved: 0,
+            type_attr: PRESENT | GATE_TASK,
+            offset_high: 0,
         }
     }
 
@@ -219,6 +237,45 @@ pub unsafe fn set_handler(vector: u8, handler: Handler) {
 /// [`set_handler`] applies in reverse.
 pub unsafe fn set_handler_with_error_code(vector: u8, handler: HandlerWithErrorCode) {
     unsafe { set_gate(vector, handler as usize) };
+}
+
+/// Routes `vector` through a hardware task switch to `tss_selector` instead of
+/// calling a handler on the interrupted stack.
+///
+/// Used for the double fault (see [`crate::tss`]), where the interrupted stack
+/// is exactly what cannot be trusted.
+///
+/// # Safety
+/// `tss_selector` must name an available 32-bit TSS descriptor in the GDT whose
+/// TSS is fully populated - `eip`, `esp`, `cs`, `ss` and the data selectors all
+/// have to describe a runnable task, because the CPU loads them wholesale and
+/// starts executing. The task register must also already point at a *different*
+/// valid TSS for the outgoing register set to be saved into, or the switch
+/// itself faults.
+///
+/// [`init`] must have run first, or the registration is discarded by the reset
+/// it performs.
+pub unsafe fn set_task_gate(vector: u8, tss_selector: u16) {
+    // SAFETY: as for `init` - single-threaded, interrupts masked.
+    let idt = unsafe { &mut *IDT.0.get() };
+    idt.entries[vector as usize] = Gate::task(tss_selector);
+}
+
+/// Removes any handler for `vector`, leaving it "not present" as [`init`] found
+/// it.
+///
+/// Taking an exception with no handler installed raises a general protection
+/// fault instead of dispatching - and if the original exception was itself a
+/// contributory one, that escalates to a double fault, which is how
+/// [`crate::exceptions`]'s double-fault trigger provokes a real one.
+///
+/// # Safety
+/// The caller must be prepared for `vector` to stop being handled, which for
+/// most vectors means the next occurrence takes down the kernel.
+pub unsafe fn clear_handler(vector: u8) {
+    // SAFETY: as for `init` - single-threaded, interrupts masked.
+    let idt = unsafe { &mut *IDT.0.get() };
+    idt.entries[vector as usize] = Gate::MISSING;
 }
 
 /// # Safety

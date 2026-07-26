@@ -25,6 +25,7 @@ pub mod exceptions;
 pub mod gdt;
 pub mod idt;
 pub mod serial;
+pub mod tss;
 pub mod vga;
 
 global_asm!(include_str!("entry.s"), options(att_syntax));
@@ -51,15 +52,20 @@ pub extern "C" fn kernel_main() -> ! {
     // Take over segmentation from the bootloader's throwaway GDT. Printing
     // first means a botched GDT load shows up as "the banner is on screen but
     // nothing after it" rather than as a completely blank screen.
+    //
+    // The TSSes come first because the GDT holds descriptors for them, and
+    // loading the task register (which `gdt::init` does) reads one.
+    tss::init(exceptions::double_fault_entry);
     gdt::init();
     let gdt = gdt::loaded();
     vga_println!("");
     vga_println!(
-        "GDT: kernel-owned at {:#010x} (limit {:#x}), cs={:#04x} ds={:#04x}",
+        "GDT: kernel-owned at {:#010x} (limit {:#x}), cs={:#04x} ds={:#04x} tr={:#04x}",
         gdt.base,
         gdt.limit,
         gdt.cs,
-        gdt.ds
+        gdt.ds,
+        gdt.tr
     );
 
     // Load an IDT of the kernel's own, then fill in the exception vectors an
@@ -78,13 +84,21 @@ pub extern "C" fn kernel_main() -> ! {
         idt.handlers
     );
     vga_println!("{}", exceptions::INSTALLED_SUMMARY);
+    let (df_stack_bottom, df_stack_top) = tss::double_fault_stack_range();
+    vga_println!(
+        "Double fault: task gate -> TSS {:#04x}, stack {:#010x}..{:#010x}",
+        gdt::DOUBLE_FAULT_TSS_SELECTOR,
+        df_stack_bottom,
+        df_stack_top
+    );
 
     serial_println!(
-        "GDT: kernel-owned at {:#010x} (limit {:#x}), cs={:#04x} ds={:#04x}",
+        "GDT: kernel-owned at {:#010x} (limit {:#x}), cs={:#04x} ds={:#04x} tr={:#04x}",
         gdt.base,
         gdt.limit,
         gdt.cs,
-        gdt.ds
+        gdt.ds,
+        gdt.tr
     );
     serial_println!(
         "IDT: {} entries at {:#010x} (limit {:#x}), {} handlers",
@@ -94,6 +108,12 @@ pub extern "C" fn kernel_main() -> ! {
         idt.handlers
     );
     serial_println!("{}", exceptions::INSTALLED_SUMMARY);
+    serial_println!(
+        "Double fault: task gate -> TSS {:#04x}, stack {:#010x}..{:#010x}",
+        gdt::DOUBLE_FAULT_TSS_SELECTOR,
+        df_stack_bottom,
+        df_stack_top
+    );
     serial_println!("GOATos booted successfully! (32-bit, from a hand-written bootloader)");
 
     // Compiles to nothing unless a `trigger-*` feature is enabled, which is

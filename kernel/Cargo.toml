@@ -21,6 +21,10 @@ spin = "0.9"
 trigger-divide-error = []
 trigger-invalid-opcode = []
 trigger-general-protection-fault = []
+# Provokes a real double fault (by taking away the divide-error handler and
+# then dividing by zero), which the CPU delivers through the vector-8 task gate
+# onto its own stack.
+trigger-double-fault = []
 
 [profile.dev]
 panic = "abort"

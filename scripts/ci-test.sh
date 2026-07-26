@@ -51,6 +51,18 @@ if ! grep -q "Exceptions: #0 divide error" "$LOG_FILE"; then
   status=1
 fi
 
+if ! grep -q "Double fault: task gate" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report a task gate for the double-fault handler"
+  status=1
+fi
+
+# `tr=0x00` would mean no TSS is loaded, so a double fault would have nowhere
+# to save the interrupted registers and would triple-fault the machine.
+if grep -q "tr=0x00" "$LOG_FILE"; then
+  echo "FAIL: task register is not pointing at the kernel's TSS"
+  status=1
+fi
+
 if grep -q "KERNEL PANIC" "$LOG_FILE"; then
   echo "FAIL: kernel panicked"
   status=1
