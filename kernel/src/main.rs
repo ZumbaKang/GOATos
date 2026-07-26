@@ -24,6 +24,7 @@ use core::panic::PanicInfo;
 pub mod exceptions;
 pub mod gdt;
 pub mod idt;
+pub mod pic;
 pub mod serial;
 pub mod tss;
 pub mod vga;
@@ -92,6 +93,27 @@ pub extern "C" fn kernel_main() -> ! {
         df_stack_top
     );
 
+    // Move the hardware IRQs off the exception vectors they collide with by
+    // default, and leave every line masked: there is still no handler for any
+    // of them, and interrupts are still disabled. This has to happen before
+    // interrupts are ever enabled, which is why it lands with the exception
+    // work rather than with the first driver that wants an IRQ.
+    pic::init();
+    let pic = pic::state();
+    let pic_masking = if pic.all_masked() {
+        "all masked"
+    } else {
+        "SOME IRQS UNMASKED"
+    };
+    vga_println!(
+        "PIC: IRQ0-15 -> vectors {}-{}, IMR {:#04x}/{:#04x} ({})",
+        pic.vector_base,
+        pic.vector_last,
+        pic.master_mask,
+        pic.slave_mask,
+        pic_masking
+    );
+
     serial_println!(
         "GDT: kernel-owned at {:#010x} (limit {:#x}), cs={:#04x} ds={:#04x} tr={:#04x}",
         gdt.base,
@@ -113,6 +135,14 @@ pub extern "C" fn kernel_main() -> ! {
         gdt::DOUBLE_FAULT_TSS_SELECTOR,
         df_stack_bottom,
         df_stack_top
+    );
+    serial_println!(
+        "PIC: IRQ0-15 -> vectors {}-{}, IMR {:#04x}/{:#04x} ({})",
+        pic.vector_base,
+        pic.vector_last,
+        pic.master_mask,
+        pic.slave_mask,
+        pic_masking
     );
     serial_println!("GOATos booted successfully! (32-bit, from a hand-written bootloader)");
 

@@ -82,11 +82,18 @@ readable diagnostic, which makes every phase after it much faster to debug.
       only other way to bound a stack, are not enforced by QEMU's or v86's
       CPU emulation, so an overflow silently corrupts memory instead of
       faulting. Closing that gap is task 2.6 below.
-- [ ] **1.5 - Remap the PIC.** Reprogram the 8259 PIC so hardware IRQs land
+- [x] **1.5 - Remap the PIC.** Reprogram the 8259 PIC so hardware IRQs land
       on vectors 32+ instead of colliding with the CPU exception vectors
       (0-31) - a classic, well-documented gotcha.
       *Done when:* the PIC is remapped and interrupts are still masked (no
       handlers yet, so nothing should fire).
+      *Done as:* `kernel/src/pic.rs` runs the four-word ICW sequence on both
+      cascaded 8259s to put IRQ0-15 on vectors 32-47, then writes 0xff to both
+      interrupt mask registers (initialization clears them, i.e. enables every
+      line, so re-masking is not optional). ICW2 is write-only, so the kernel
+      banner reports the vector range it programmed alongside the masks it
+      reads back; the remap itself was verified externally against QEMU's
+      `info pic`, which shows `irq_base=20`/`irq_base=28` and `imr=ff` on both.
 - [ ] **1.6 - Enable interrupts.** Re-enable interrupts (`sti`) now that
       there's an IDT and PIC in a known state. Add a "spurious/unhandled
       interrupt" default handler for any vector without a real one yet, so
