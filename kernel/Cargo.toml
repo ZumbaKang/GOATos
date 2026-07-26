@@ -12,6 +12,16 @@ path = "src/main.rs"
 uart_16550 = "0.6"
 spin = "0.9"
 
+# Debug-only switches that make the kernel raise one CPU exception on purpose,
+# right after the handlers for it are installed, so those handlers can be
+# verified against the real thing (see `exceptions::trigger_debug_exception`).
+# Enable exactly one, and only for a test boot:
+#   make disk KERNEL_FEATURES=trigger-divide-error
+[features]
+trigger-divide-error = []
+trigger-invalid-opcode = []
+trigger-general-protection-fault = []
+
 [profile.dev]
 panic = "abort"
 
