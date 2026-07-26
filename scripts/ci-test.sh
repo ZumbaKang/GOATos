@@ -56,6 +56,18 @@ if ! grep -q "Double fault: task gate" "$LOG_FILE"; then
   status=1
 fi
 
+if ! grep -q "PIC: IRQ0-15 -> vectors 32-47" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report remapping the PIC above the exception vectors"
+  status=1
+fi
+
+# An unmasked line with no handler registered for its vector would fault as
+# soon as interrupts are enabled, so the remap must not leave any enabled.
+if ! grep -q "IMR 0xff/0xff (all masked)" "$LOG_FILE"; then
+  echo "FAIL: PIC came out of the remap with IRQ lines unmasked"
+  status=1
+fi
+
 # `tr=0x00` would mean no TSS is loaded, so a double fault would have nowhere
 # to save the interrupted registers and would triple-fault the machine.
 if grep -q "tr=0x00" "$LOG_FILE"; then
