@@ -4,10 +4,11 @@
 ; Multiboot, nothing but what the BIOS gives us for free. The BIOS loads
 ; this single 512-byte sector to 0x7C00 and jumps to it in 16-bit real mode.
 ; From here we:
-;   1. load the kernel (following sectors on the same disk) into memory
-;   2. enable the A20 line, so we can address memory past 1MiB
-;   3. set up a flat GDT and switch the CPU into 32-bit protected mode
-;   4. jump into the kernel's entry point
+;   1. ask the BIOS for the system memory map, while it can still answer
+;   2. load the kernel (following sectors on the same disk) into memory
+;   3. enable the A20 line, so we can address memory past 1MiB
+;   4. set up a flat GDT and switch the CPU into 32-bit protected mode
+;   5. jump into the kernel's entry point
 ;
 ; KERNEL_SECTORS is supplied at assemble time (`nasm -D KERNEL_SECTORS=N`)
 ; by the Makefile, computed from the kernel binary's actual size, so this
@@ -18,6 +19,17 @@
 
 KERNEL_LOAD_SEGMENT equ 0x1000   ; kernel is loaded at physical 0x10000
 KERNEL_LOAD_ADDR    equ 0x10000
+
+; Where the memory map is left for the kernel. 0x500 is the start of the
+; classic low-memory scratch area: above the BIOS data area, far below both
+; this boot sector (0x7c00) and the kernel (0x10000), and claimed by nothing
+; else here. The block is a dword signature, a dword entry count, and then
+; the raw E820 entries; it ends at 0x808, so it also stays clear of the
+; real-mode stack growing down from 0x7c00.
+MEMMAP_ADDR         equ 0x500
+MEMMAP_SIGNATURE    equ 0x54414f47   ; "GOAT", little-endian
+MEMMAP_ENTRY_SIZE   equ 24
+MEMMAP_MAX_ENTRIES  equ 32
 
 start:
     cli
@@ -32,6 +44,7 @@ start:
     mov si, msg_loading
     call print_string
 
+    call detect_memory
     call get_disk_geometry
     call load_kernel
     call enable_a20
@@ -58,6 +71,41 @@ print_string:
     jmp .next_char
 .done:
     popa
+    ret
+
+; Asks the BIOS for the system memory map (INT 15h, EAX=E820h) and stashes it
+; at MEMMAP_ADDR. This has to happen here, in real mode: once we are in
+; protected mode the BIOS is unreachable, so the kernel has no way of its own
+; to find out how much RAM exists or which of it is usable.
+;
+; Each call returns one entry (base, length, type, and - since ACPI 3.0 - an
+; extended attributes dword) and a continuation value in EBX; the walk is over
+; when EBX comes back zero, or the BIOS reports carry. A BIOS with no E820
+; support just leaves the count at zero, which the kernel reports rather than
+; guessing at a memory size.
+detect_memory:
+    mov dword [MEMMAP_ADDR], MEMMAP_SIGNATURE
+    mov di, MEMMAP_ADDR + 8       ; ES = DS = 0 here, so DI is a flat address
+    xor ebx, ebx                  ; continuation value: 0 starts a fresh walk
+    xor ebp, ebp                  ; entries stored so far
+.next_entry:
+    mov eax, 0xe820
+    mov edx, 0x534d4150           ; 'SMAP', which a working BIOS echoes back
+    mov ecx, MEMMAP_ENTRY_SIZE
+    mov dword [di + 20], 1        ; ACPI 3.0 "entry is valid" bit, pre-set in
+                                  ; case the BIOS only writes the first 20
+    int 0x15
+    jc .done                      ; carry: unsupported, or the walk ended here
+    cmp eax, 0x534d4150
+    jne .done
+    inc ebp
+    add di, MEMMAP_ENTRY_SIZE
+    test ebx, ebx                 ; zero continuation: that was the last entry
+    jz .done
+    cmp ebp, MEMMAP_MAX_ENTRIES
+    jb .next_entry
+.done:
+    mov [MEMMAP_ADDR + 4], ebp
     ret
 
 ; Asks the BIOS for the boot drive's CHS geometry (INT 13h/AH=08h). We use

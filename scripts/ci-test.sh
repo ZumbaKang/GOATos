@@ -88,6 +88,52 @@ if ! grep -q "Interrupts: enabled (IF=1), IMR 0xff/0xff, 0 unhandled" "$LOG_FILE
   status=1
 fi
 
+# The BIOS memory map the boot sector collects in real mode and hands over at
+# a fixed address. Nothing consumes it yet, so these checks are the only thing
+# keeping that handoff honest.
+if grep -q "MEMORY MAP UNAVAILABLE" "$LOG_FILE"; then
+  echo "FAIL: the boot sector handed the kernel no BIOS memory map"
+  status=1
+fi
+
+if grep -q "(TRUNCATED" "$LOG_FILE"; then
+  echo "FAIL: the BIOS reported more memory regions than the handoff block holds"
+  status=1
+fi
+
+# Low memory is the one region every PC has and every BIOS reports, so its
+# absence means the entries themselves are being misread even if the count
+# looks plausible.
+if ! grep -qE "^E820: +0x0000000000-0x[0-9a-f]+ +[0-9]+ KiB +usable$" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report conventional low memory as usable"
+  status=1
+fi
+
+memory_summary="$(grep -m1 '^Memory: ' "$LOG_FILE")"
+if [ -z "$memory_summary" ]; then
+  echo "FAIL: kernel did not report a memory map summary"
+  status=1
+else
+  regions="$(sed -n 's/^Memory: \([0-9]\+\) E820 regions.*/\1/p' <<<"$memory_summary")"
+  usable_mib="$(sed -n 's/^Memory: .*, \([0-9]\+\) MiB usable.*/\1/p' <<<"$memory_summary")"
+
+  # Any PC splits its address space into at least "low RAM / the hole below
+  # 1MiB / RAM above it", so a map of one or two regions is a parsing bug.
+  if [ -z "$regions" ] || [ "$regions" -lt 3 ]; then
+    echo "FAIL: implausibly short memory map (${regions:-no} regions)"
+    status=1
+  fi
+
+  # QEMU is started above with no -m, i.e. its 128MiB default; a few MiB of
+  # that is reserved for the firmware and the PCI hole, so the usable total
+  # lands just under it. Anything outside this window means the kernel is
+  # reading lengths, not just reporting them, wrongly.
+  if [ -z "$usable_mib" ] || [ "$usable_mib" -lt 100 ] || [ "$usable_mib" -gt 128 ]; then
+    echo "FAIL: usable memory (${usable_mib:-none} MiB) does not match QEMU's 128MiB default"
+    status=1
+  fi
+fi
+
 # A stray interrupt on a vector nothing owns, once interrupts are on.
 if grep -q "UNHANDLED INTERRUPT" "$LOG_FILE"; then
   echo "FAIL: kernel took an interrupt it had no handler for"

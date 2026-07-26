@@ -25,6 +25,7 @@ pub mod exceptions;
 pub mod gdt;
 pub mod idt;
 pub mod interrupts;
+pub mod memory;
 pub mod pic;
 pub mod serial;
 pub mod tss;
@@ -126,6 +127,13 @@ pub extern "C" fn kernel_main() -> ! {
         idt::ENTRY_COUNT - spare_vectors
     );
 
+    // What the bootloader asked the BIOS before protected mode put it out of
+    // reach. Nothing consumes this yet - it is the input a frame allocator and
+    // paging both start from - so for now the kernel just reports it, which is
+    // also how it gets checked against the RAM the machine was given.
+    let memory = memory::map::load();
+    vga_println!("{}", memory);
+
     serial_println!(
         "GDT: kernel-owned at {:#010x} (limit {:#x}), cs={:#04x} ds={:#04x} tr={:#04x}",
         gdt.base,
@@ -161,6 +169,19 @@ pub extern "C" fn kernel_main() -> ! {
         spare_vectors,
         idt::ENTRY_COUNT - spare_vectors
     );
+    // The screen only has room for the summary, but serial has room for the
+    // whole map - and the individual regions are the part worth eyeballing
+    // against the RAM size the machine was configured with.
+    for region in memory.regions() {
+        serial_println!(
+            "E820:   {:#012x}-{:#012x} {:>9} KiB  {}",
+            region.base,
+            region.end(),
+            region.length / 1024,
+            region.kind
+        );
+    }
+    serial_println!("{}", memory);
 
     // The last piece of setup, and the first moment the kernel can be
     // interrupted at all. The masks are re-read afterwards because they are
