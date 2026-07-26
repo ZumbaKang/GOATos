@@ -52,8 +52,7 @@ const GENERAL_PROTECTION_FAULT: u8 = 13;
 /// One-line summary of what [`init`] installed, for the boot banner.
 /// `scripts/ci-test.sh` greps for it, so printing it doubles as the automated
 /// check that these handlers are still being registered.
-pub const INSTALLED_SUMMARY: &str =
-    "Exceptions: #0 divide error, #6 invalid opcode, #13 GP fault";
+pub const INSTALLED_SUMMARY: &str = "Exceptions: #0 divide error, #6 invalid opcode, #13 GP fault";
 
 /// Registers the handlers above. [`crate::idt::init`] must have run first (it
 /// resets every vector) and [`crate::gdt::init`] before that (the gates refer
