@@ -12,11 +12,17 @@
 //! it booted), then halts.
 #![no_std]
 #![no_main]
+// Interrupt/exception handlers are raw CPU entry points: they need the
+// compiler to emit an `iret` epilogue and preserve every register, which is
+// what the (still-unstable) `x86-interrupt` calling convention does. See
+// `idt::Handler`.
+#![feature(abi_x86_interrupt)]
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 
 pub mod gdt;
+pub mod idt;
 pub mod serial;
 pub mod vga;
 
@@ -49,6 +55,20 @@ pub extern "C" fn kernel_main() -> ! {
         gdt.ds
     );
 
+    // Load an (empty) IDT of the kernel's own. Interrupts stay masked and no
+    // vector has a handler yet, so nothing should route through it - the point
+    // of doing it now is that everything after this line can be given a real
+    // fault handler instead of freezing.
+    idt::init();
+    let idt = idt::loaded();
+    vga_println!(
+        "IDT: {} entries at {:#010x} (limit {:#x}), {} handlers",
+        idt.entries(),
+        idt.base,
+        idt.limit,
+        idt.handlers
+    );
+
     // Serial output is best-effort: useful for headless QEMU/CI, but its
     // absence must never affect anything above.
     serial::init();
@@ -59,6 +79,13 @@ pub extern "C" fn kernel_main() -> ! {
         gdt.limit,
         gdt.cs,
         gdt.ds
+    );
+    serial_println!(
+        "IDT: {} entries at {:#010x} (limit {:#x}), {} handlers",
+        idt.entries(),
+        idt.base,
+        idt.limit,
+        idt.handlers
     );
 
     hlt_loop();
