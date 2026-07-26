@@ -51,7 +51,7 @@ readable diagnostic, which makes every phase after it much faster to debug.
       the minimal one `boot.asm` builds just to get into protected mode.
       *Done when:* the kernel loads its own GDT and still boots/prints
       normally in QEMU and v86.
-- [ ] **1.2 - IDT scaffolding.** Add `kernel/src/idt.rs`: the 256-entry IDT
+- [x] **1.2 - IDT scaffolding.** Add `kernel/src/idt.rs`: the 256-entry IDT
       structure, a way to register a handler for a given vector, and the
       `lidt` call to load it. No real handlers yet.
       *Done when:* the IDT loads without faulting (verify by loading it and

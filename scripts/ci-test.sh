@@ -41,6 +41,11 @@ if ! grep -q "GDT: kernel-owned" "$LOG_FILE"; then
   status=1
 fi
 
+if ! grep -q "IDT: 256 entries" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report loading a full 256-entry IDT"
+  status=1
+fi
+
 if grep -q "KERNEL PANIC" "$LOG_FILE"; then
   echo "FAIL: kernel panicked"
   status=1
