@@ -46,7 +46,7 @@ bug that trips a CPU exception has undefined, unrecoverable behavior (most
 likely a silent reboot). This phase turns "the kernel just froze" into a
 readable diagnostic, which makes every phase after it much faster to debug.
 
-- [ ] **1.1 - Kernel-owned GDT.** Rewrite the GDT in Rust
+- [x] **1.1 - Kernel-owned GDT.** Rewrite the GDT in Rust
       (`kernel/src/gdt.rs`), loaded at kernel startup, replacing reliance on
       the minimal one `boot.asm` builds just to get into protected mode.
       *Done when:* the kernel loads its own GDT and still boots/prints
