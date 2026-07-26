@@ -42,6 +42,16 @@ jobs:
   # a human clicks "Ready for review". Deliberately scoped to `cursor/*`
   # branches in this repository: draft status still means "not ready" for
   # human PRs and for anything from a fork.
+  #
+  # This needs a `PR_READY_TOKEN` secret: taking a PR out of draft is one of
+  # the things the default `GITHUB_TOKEN` cannot do at all (it is a GitHub App
+  # token, and `markPullRequestReadyForReview` is not available to apps, no
+  # matter which `permissions:` are granted), so it fails with "Resource not
+  # accessible by integration". A fine-grained PAT scoped to this repository
+  # with `Pull requests: read and write` is enough. Without the secret the
+  # step says so and leaves the PR as a draft rather than failing the run -
+  # the `test` job's result is what matters, and a draft simply doesn't get
+  # merged.
   ready-for-review:
     if: >
       github.event_name == 'pull_request' &&
@@ -53,14 +63,20 @@ jobs:
     steps:
       - name: Mark the pull request ready for review
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PR_READY_TOKEN || secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          if [ "$(gh pr view "$PR_NUMBER" --repo "$REPO" --json isDraft --jq .isDraft)" = "true" ]; then
-            gh pr ready "$PR_NUMBER" --repo "$REPO"
-          else
+          if [ "$(gh pr view "$PR_NUMBER" --repo "$REPO" --json isDraft --jq .isDraft)" != "true" ]; then
             echo "Already ready for review; nothing to do."
+            exit 0
+          fi
+
+          if gh pr ready "$PR_NUMBER" --repo "$REPO"; then
+            echo "Marked ready for review."
+          else
+            echo "Could not mark this pull request ready for review, so it stays a draft and will not be auto-merged. Set the PR_READY_TOKEN secret (a PAT with pull-requests write) if this was meant to be automatic." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
   # Merges the PR automatically once `test` passes, but only for PRs on

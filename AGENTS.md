@@ -43,10 +43,14 @@ push to `main`, then auto-merges (squash) any PR from a `cursor/*` branch
 that passes. Because the Cursor Automation's PR tool can only open drafts —
 which auto-merge refuses to touch — the same workflow first marks `cursor/*`
 PRs ready for review (the `ready-for-review` job); draft still means "not
-ready" for human PRs and for anything from a fork. This is what lets the OS
-build itself out via a scheduled/triggered Cursor Automation picking tasks
-off `ROADMAP.md` — see `.cursor/skills/roadmap-automation/SKILL.md` for the
-full procedure an agent (automated or not) should follow.
+ready" for human PRs and for anything from a fork. That job needs the
+`PR_READY_TOKEN` secret — a PAT with `Pull requests: read and write` — since
+the default `GITHUB_TOKEN` is an app token and cannot take a PR out of draft
+at all; if the secret is missing, the job says so and the PR stays a draft
+(unmerged) instead of failing CI. This is what lets the OS build itself out
+via a scheduled/triggered Cursor Automation picking tasks off `ROADMAP.md` —
+see `.cursor/skills/roadmap-automation/SKILL.md` for the full procedure an
+agent (automated or not) should follow.
 
 ### Running / testing gotchas
 
