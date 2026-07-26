@@ -12,40 +12,87 @@ reports the exceptions an ordinary kernel bug is most likely to trip.
 ## What exists now
 
 - `kernel/src/gdt.rs` - a kernel-owned flat GDT (null / ring-0 code `0x08` /
-  ring-0 data `0x10`), replacing the throwaway one `boot.asm` builds. Still in
-  `.rodata`, so installing a TSS descriptor at runtime needs it made writable
-  first.
+  ring-0 data `0x10`) plus descriptors for the two TSSes below, replacing the
+  throwaway table `boot.asm` builds. It lives in an `UnsafeCell` (not
+  `.rodata`) because the TSS descriptors are built at runtime and the CPU
+  writes their busy bits itself.
 - `kernel/src/idt.rs` - the 256-entry IDT, `set_handler` /
-  `set_handler_with_error_code`, and `lidt`/`sidt`. Handlers take the stack
-  frame **by value** (`extern "x86-interrupt" fn(StackFrame)`); a pointer
-  parameter is materialised *from* the frame instead of pointing at it.
+  `set_handler_with_error_code` / `set_task_gate` / `clear_handler`, and
+  `lidt`/`sidt`. Handlers take the stack frame **by value**
+  (`extern "x86-interrupt" fn(StackFrame)`); a pointer parameter is
+  materialised *from* the frame instead of pointing at it.
+- `kernel/src/tss.rs` - two Task State Segments and a private 4 KiB stack, the
+  machinery behind the double-fault handler (see below).
 - `kernel/src/exceptions.rs` - handlers for divide error (0), invalid opcode
-  (6), and general protection fault (13). Each prints the vector, faulting
-  `eip`/`cs`/`eflags` (and the error code, for 13) to VGA *and* serial, then
-  halts. No recovery, by design.
+  (6), double fault (8), and general protection fault (13). Each prints the
+  vector, faulting `eip`/`cs`/`eflags` (and the error code, for 13) to VGA
+  *and* serial, then halts. No recovery, by design.
 - Debug-only `trigger-*` cargo features raise one of those exceptions on
   purpose, e.g. `make run KERNEL_FEATURES=trigger-divide-error` - the way to
   re-verify handler changes against a real fault instead of by inspection.
 
+## The double fault, and why it is a *task* gate
+
+32-bit x86 has no Interrupt Stack Table (that's an x86-64 addition). An
+interrupt taken while already in ring 0 keeps using the stack it interrupted,
+and a TSS's `ss0`/`esp0` are consulted *only* on a privilege-level change - so
+they do not help a ring-0 kernel at all. The one architectural way to make a
+handler start on a known-good stack is a **task gate**: the CPU does a full
+hardware task switch, saving the interrupted registers into the TSS named by
+the task register and loading a complete new set (`esp` included) from the TSS
+named by the gate.
+
+Hence two TSSes: `MAIN_TSS` exists purely to be written to (a task switch with
+nowhere to save the outgoing state faults), and `DOUBLE_FAULT_TSS` is a
+prepared register image pointing at `exceptions::double_fault_entry`. Things
+that follow from this and are easy to get wrong:
+
+- `tss::init` must run **before** `gdt::init`, which builds the descriptors and
+  runs `ltr`. `gdt::loaded().tr` reads the task register back; `tr=0x00` means a
+  double fault would triple-fault, which `scripts/ci-test.sh` now checks for.
+- The double-fault entry point is a plain `extern "C" fn() -> !`, *not* an
+  `extern "x86-interrupt"` handler: it is a task entry point, so there is no
+  interrupt frame on the stack (read the interrupted state from the main TSS
+  via `tss::interrupted_state()`) and no `iret` to emit.
+- Both TSSes carry a `cr3` that the CPU loads on the switch. It is 0 today
+  because paging is off; **when paging lands it must become the kernel's real
+  page directory.**
+
+### Provoking a real double fault
+
+A kernel cannot raise #8 directly - it is what the CPU reports when it fails to
+deliver *another* exception. `trigger-double-fault` manufactures exactly that:
+`idt::clear_handler(0)` then a divide by zero, so delivery of #DE raises #GP,
+and two contributory exceptions in a row *are* the definition of a double
+fault.
+
+The textbook cause, a stack overflow, cannot be provoked yet: with no paging
+there is no guard page below the kernel stack, and segment limits (the only
+other way to bound a stack) **are not enforced by QEMU's TCG emulation** -
+verified directly, an out-of-range write through a deliberately bounded
+expand-down segment silently succeeds. So an overflow corrupts memory rather
+than faulting; roadmap task 2.6 closes that once paging exists.
+
+**v86 does not implement the escalation at all** - it aborts the whole emulator
+with `panicked at src/rust/cpu/cpu.rs: Unimplemented: #GP handler`. It *does*
+implement 32-bit hardware task switching, so `trigger-double-fault-gate`
+(a plain `int $8` through the same gate) is what proves the switch and the
+private stack in the browser demo, with output identical to QEMU's.
+
 ## What is still missing
 
-Double fault (8) with its own TSS stack, PIC remapping, `sti`, and a default
-handler for unregistered vectors - in that order (see `ROADMAP.md` phase 1).
-Note that until a double-fault handler exists, a fault *inside* a handler
-still triple-faults into a silent reboot.
+PIC remapping, `sti`, and a default handler for unregistered vectors - in that
+order (see `ROADMAP.md` phase 1).
 
 ## Suggested order for the rest
 
-1. **Double fault (8).** Needs a dedicated stack via a TSS, so that a fault
-   raised *by* a stack overflow can still be reported; a double fault taken on
-   the overflowed stack faults again and triple-faults the machine.
-2. **Page fault (14)**, once paging exists - the error code and `CR2` say
-   nearly everything about the bug that caused it.
-3. **PIC setup** to actually receive hardware interrupts (timer, keyboard).
+1. **PIC setup** to actually receive hardware interrupts (timer, keyboard).
    Remap the legacy PIC's vectors so they don't collide with the CPU
    exception vectors (0-31); that collision is a classic, well documented
    gotcha.
-4. Once that's in place, a **timer (PIT) interrupt handler** and a
+2. **Page fault (14)**, once paging exists - the error code and `CR2` say
+   nearly everything about the bug that caused it.
+3. Once that's in place, a **timer (PIT) interrupt handler** and a
    **keyboard interrupt handler** are natural next drivers (see the
    `drivers` skill).
 

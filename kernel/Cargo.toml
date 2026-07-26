@@ -21,6 +21,14 @@ spin = "0.9"
 trigger-divide-error = []
 trigger-invalid-opcode = []
 trigger-general-protection-fault = []
+# Provokes a real double fault (by taking away the divide-error handler and
+# then dividing by zero), which the CPU delivers through the vector-8 task gate
+# onto its own stack.
+trigger-double-fault = []
+# Takes vector 8 directly (`int $8`) instead of provoking a real escalation:
+# proves the task gate and private stack under emulators that don't implement
+# turning a failed exception delivery into a double fault (v86).
+trigger-double-fault-gate = []
 
 [profile.dev]
 panic = "abort"

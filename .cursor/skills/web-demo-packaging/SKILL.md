@@ -55,7 +55,18 @@ These cost real debugging time; don't re-discover them:
    (`INT 13h/AH=02h`, see `bootloader-and-linking`) do not have this
    problem. If a disk read seems to silently hang only under v86, suspect
    the extended-read BIOS service first.
-4. **A UART loopback self-test (`Uart16550::test_loopback()`) hung under
+4. **v86 does not implement escalating a failed exception delivery into a
+   double fault.** When the kernel deliberately makes exception delivery
+   fail (`KERNEL_FEATURES=trigger-double-fault`), v86 aborts the whole
+   emulator - `panicked at src/rust/cpu/cpu.rs: Unimplemented: #GP handler`,
+   visible only in the browser console, with the screen simply frozen. QEMU
+   raises #8 correctly. v86 *does* implement 32-bit hardware task switching,
+   so `trigger-double-fault-gate` (a plain `int $8` through the same task
+   gate) is the way to exercise a task-gate handler in the browser. General
+   lesson: when the v86 screen freezes with no kernel output, read the
+   browser console before suspecting the kernel - an "Unimplemented" panic
+   there means v86, not GOATos, gave up.
+5. **A UART loopback self-test (`Uart16550::test_loopback()`) hung under
    v86.** This was the trickiest bug: the kernel would boot, run
    correctly, and then freeze with *zero* output (not even VGA) because
    the serial driver's init panicked, and the panic handler's own attempt
