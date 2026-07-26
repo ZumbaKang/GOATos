@@ -21,6 +21,7 @@
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 
+pub mod exceptions;
 pub mod gdt;
 pub mod idt;
 pub mod serial;
@@ -41,6 +42,12 @@ pub extern "C" fn kernel_main() -> ! {
     vga_println!("hardware (and browser emulators like v86) render -");
     vga_println!("what you see here is what a web visitor would see.");
 
+    // Serial output is best-effort: useful for headless QEMU/CI, but its
+    // absence must never affect anything above. It comes up before the
+    // subsystems below so that a fault in any of them still has a headless
+    // surface to report itself on (see `exceptions`).
+    serial::init();
+
     // Take over segmentation from the bootloader's throwaway GDT. Printing
     // first means a botched GDT load shows up as "the banner is on screen but
     // nothing after it" rather than as a completely blank screen.
@@ -55,11 +62,13 @@ pub extern "C" fn kernel_main() -> ! {
         gdt.ds
     );
 
-    // Load an (empty) IDT of the kernel's own. Interrupts stay masked and no
-    // vector has a handler yet, so nothing should route through it - the point
-    // of doing it now is that everything after this line can be given a real
-    // fault handler instead of freezing.
+    // Load an IDT of the kernel's own, then fill in the exception vectors an
+    // ordinary kernel bug is most likely to hit. Interrupts are still masked,
+    // so nothing but a fault can route through it yet - which is the point:
+    // from here on, a bug in the code below reports itself instead of
+    // triple-faulting the machine into a silent reboot.
     idt::init();
+    exceptions::init();
     let idt = idt::loaded();
     vga_println!(
         "IDT: {} entries at {:#010x} (limit {:#x}), {} handlers",
@@ -68,11 +77,8 @@ pub extern "C" fn kernel_main() -> ! {
         idt.limit,
         idt.handlers
     );
+    vga_println!("{}", exceptions::INSTALLED_SUMMARY);
 
-    // Serial output is best-effort: useful for headless QEMU/CI, but its
-    // absence must never affect anything above.
-    serial::init();
-    serial_println!("GOATos booted successfully! (32-bit, from a hand-written bootloader)");
     serial_println!(
         "GDT: kernel-owned at {:#010x} (limit {:#x}), cs={:#04x} ds={:#04x}",
         gdt.base,
@@ -87,11 +93,20 @@ pub extern "C" fn kernel_main() -> ! {
         idt.limit,
         idt.handlers
     );
+    serial_println!("{}", exceptions::INSTALLED_SUMMARY);
+    serial_println!("GOATos booted successfully! (32-bit, from a hand-written bootloader)");
+
+    // Compiles to nothing unless a `trigger-*` feature is enabled, which is
+    // how the handlers above get verified against a real exception.
+    exceptions::trigger_debug_exception();
 
     hlt_loop();
 }
 
-fn hlt_loop() -> ! {
+/// Parks the CPU for good, waking only to halt again. Used both for a normal
+/// end of `kernel_main` and by an exception handler that has finished
+/// reporting.
+pub fn hlt_loop() -> ! {
     loop {
         unsafe { asm!("hlt") };
     }

@@ -46,8 +46,21 @@ if ! grep -q "IDT: 256 entries" "$LOG_FILE"; then
   status=1
 fi
 
+if ! grep -q "Exceptions: #0 divide error" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report installing its CPU exception handlers"
+  status=1
+fi
+
 if grep -q "KERNEL PANIC" "$LOG_FILE"; then
   echo "FAIL: kernel panicked"
+  status=1
+fi
+
+# A normal boot must not fault. This only catches an exception the handlers
+# installed so far actually cover, but that is exactly the set a plain boot
+# could plausibly hit.
+if grep -q "CPU EXCEPTION" "$LOG_FILE"; then
+  echo "FAIL: kernel took an unexpected CPU exception"
   status=1
 fi
 
