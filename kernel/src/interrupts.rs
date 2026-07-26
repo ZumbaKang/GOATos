@@ -22,6 +22,12 @@
 //! can get through until the driver that owns one clears its bit. The
 //! catch-all is what makes that safe to get wrong - an unmasked line with no
 //! driver behind it prints a diagnostic instead of taking the machine down.
+//!
+//! That masking is also the only reason reporting from here is safe: the report
+//! takes the VGA writer's lock, so an interrupt arriving *during* a print would
+//! deadlock rather than report. Nothing can interrupt a print while every line
+//! is masked; the first driver to unmask one has to deal with it, which is
+//! `ROADMAP.md` task 3.0.
 
 use core::arch::asm;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -188,14 +194,16 @@ fn dispatch(vector: u8, error_code: Option<u32>, frame: &StackFrame) {
         }
         if vector < EXCEPTION_VECTOR_COUNT {
             diag_println!("    Halted - an unhandled CPU exception cannot be resumed.");
-        } else if spurious == Some(true) {
-            diag_println!("    Resuming - spurious, so the PIC got no EOI.");
-        } else if irq.is_some() {
-            diag_println!("    Resuming - the IRQ was acknowledged and dropped.");
         } else {
-            diag_println!("    Resuming - nothing can raise this vector but the kernel.");
+            if spurious == Some(true) {
+                diag_println!("    Resuming - spurious, so the PIC got no EOI.");
+            } else if irq.is_some() {
+                diag_println!("    Resuming - the IRQ was acknowledged and dropped.");
+            } else {
+                diag_println!("    Resuming - nothing can raise this vector but the kernel.");
+            }
+            diag_println!("    Further reports for this vector are suppressed.");
         }
-        diag_println!("    Further reports for this vector are suppressed.");
     }
 
     // Returning from an exception would re-execute the instruction that
@@ -337,10 +345,30 @@ pub fn trigger_debug_interrupt() {
         // catch-all it reaches returns rather than halting - which is the
         // property being tested, so the line printed afterwards is the proof.
         unsafe { asm!("int $0x60", options(att_syntax)) };
+        // Again, to show what a vector that fires repeatedly looks like: an
+        // unmasked line with no driver would arrive continuously, and burying
+        // the first report under thousands of copies of itself would defeat the
+        // point of reporting at all.
+        //
+        // SAFETY: as above.
+        unsafe { asm!("int $0x60", options(att_syntax)) };
         diag_println!(
-            "DEBUG: resumed after the report ({} unhandled so far)",
+            "DEBUG: resumed twice, reported once ({} unhandled so far)",
             unhandled_count()
         );
+    }
+
+    #[cfg(feature = "trigger-unhandled-exception")]
+    {
+        diag_println!("DEBUG: raising #3, an exception with no handler of its own...");
+        // The other branch of the catch-all: an exception it cannot resume
+        // from. `int3` is the one exception a kernel can raise directly that
+        // nothing here registers, and it pushes no error code, so the frame the
+        // report prints is the real thing rather than a lookalike.
+        //
+        // SAFETY: raising it is the point, and the catch-all halts, so nothing
+        // after this runs.
+        unsafe { asm!("int3", options(att_syntax)) };
     }
 
     #[cfg(feature = "trigger-spurious-irq")]

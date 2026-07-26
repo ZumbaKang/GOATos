@@ -33,6 +33,9 @@ trigger-double-fault-gate = []
 # should report and then *resume* from - unlike an exception, a stray interrupt
 # is not fatal (see `interrupts::trigger_debug_interrupt`).
 trigger-unhandled-interrupt = []
+# Raises exception 3 (`int3`), which no handler claims: the catch-all's other
+# branch, where reporting is followed by a halt rather than a resume.
+trigger-unhandled-exception = []
 # Takes vector 39, the line an 8259 raises when it has an interrupt it cannot
 # attribute to any IRQ: the handler must recognise it from the in-service
 # register and *not* acknowledge it.

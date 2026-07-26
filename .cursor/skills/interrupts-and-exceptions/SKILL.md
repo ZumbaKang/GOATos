@@ -5,9 +5,10 @@ description: How GOATos's GDT/IDT and CPU exception handlers work (kernel/src/gd
 
 # Interrupts and exceptions
 
-GOATos still runs with interrupts disabled the whole time (`cli` in
-`boot/boot.asm`, never re-enabled), but it does own its descriptor tables and
-reports the exceptions an ordinary kernel bug is most likely to trip.
+GOATos owns its descriptor tables, reports the exceptions an ordinary kernel
+bug is most likely to trip, and runs with interrupts enabled - every vector
+goes somewhere, though no IRQ line is unmasked yet, so nothing is actually
+delivered until a driver asks for one.
 
 ## What exists now
 
@@ -29,7 +30,12 @@ reports the exceptions an ordinary kernel bug is most likely to trip.
   *and* serial, then halts. No recovery, by design.
 - `kernel/src/pic.rs` - the two cascaded 8259 PICs, reprogrammed so IRQ0-15
   raise vectors 32-47 instead of the BIOS's real-mode 8-15/0x70-0x77 (which
-  collide with the exception vectors), with every IRQ line then masked.
+  collide with the exception vectors), with every IRQ line then masked. Also
+  `end_of_interrupt`, which acknowledges a serviced IRQ (and recognises a
+  spurious one, which must *not* be acknowledged).
+- `kernel/src/interrupts.rs` - `sti`, plus the catch-all that makes it safe:
+  every vector `exceptions::init` didn't claim gets an entry point that reports
+  what arrived. See below.
 - Debug-only `trigger-*` cargo features raise one of those exceptions on
   purpose, e.g. `make run KERNEL_FEATURES=trigger-divide-error` - the way to
   re-verify handler changes against a real fault instead of by inspection.
@@ -98,13 +104,54 @@ actually read from the hardware. To check the remap from outside the kernel,
 ask QEMU: `-monitor unix:/tmp/mon.sock,server,nowait`, then `info pic` prints
 `irq_base=20`/`irq_base=28` and `imr=ff` for the two controllers (before the
 remap: `irq_base=08`/`irq_base=70`, with `imr=b8` - the BIOS leaves IRQ0, 1, 2
-and 6 enabled). A masked-but-latched IRQ shows up there as `irr=01`, which is
-the timer waiting for permission it will not get until roadmap task 1.6.
+and 6 enabled). A masked-but-latched IRQ shows up there as `irr=01`: the timer,
+waiting for permission it will not get until something unmasks its line.
+
+## The catch-all, and why enabling interrupts needed one
+
+`idt::init` leaves a vector it was not asked about "not present", and taking a
+not-present vector raises a #GP *whose own delivery* counts as a second
+exception - so before `sti`, a single stray interrupt would have escalated to a
+double fault. "Interrupts are on" and "every vector goes somewhere" therefore
+had to land together: `interrupts::init` fills the 252 vectors
+`exceptions::init` doesn't claim, and only then does `interrupts::enable` run
+`sti`.
+
+Things about it that are easy to get wrong:
+
+- An `extern "x86-interrupt"` handler is told nothing about which vector it was
+  entered for, so the only way for the report to name it is one entry point per
+  vector: `unhandled::<VECTOR>` is monomorphised 256 times (in rows of 16, via
+  a macro, since a const-generic argument can be a literal expression but not
+  an expression over another const parameter). That costs ~26 KB of image -
+  worth it for reports that say `#14 page fault` instead of `#14`.
+- The shape has to match the vector: 8, 10, 11, 12, 13, 14, 17, 21, 29 and 30
+  are entered with an error code already pushed. A handler with the wrong shape
+  reads the error code where it expects `eip`.
+- Disposition differs by vector, and both directions matter. An unhandled
+  *exception* must halt: `iret` would re-execute the faulting instruction,
+  fault again, and print again forever. A stray *IRQ* (or an `int n` to an
+  unused vector) must resume - halting the machine over one is a worse outcome
+  than a diagnostic - but it has to be acknowledged first, or the controller
+  keeps that line and every lower-priority one blocked.
+- A vector reports only the first time it fires. A line unmasked with no driver
+  behind it arrives continuously, and the thousandth copy of a report buries
+  the first one, which is the one with context in it.
+- `pic::end_of_interrupt` deliberately takes no lock, unlike the rest of that
+  module: it runs in interrupt context, where blocking on a lock the
+  interrupted code holds would hang the kernel. It doesn't need one - the ports
+  and the bytes written are constants.
+
+Both `trigger-unhandled-interrupt` (resume path, and the report-once
+suppression) and `trigger-unhandled-exception` (halt path) exercise it, and
+`trigger-spurious-irq` takes vector 39 to reach the phantom-IRQ branch. v86
+implements the OCW3 in-service read that branch depends on, and produces output
+identical to QEMU's.
 
 ## What is still missing
 
-`sti`, and a default handler for unregistered vectors - in that order (see
-`ROADMAP.md` phase 1).
+Nothing in phase 1. The next interrupt-adjacent work is in `ROADMAP.md`
+phases 2 and 3 (see below).
 
 ## Suggested order for the rest
 

@@ -41,10 +41,11 @@ the OS keeps building itself out even when no one's driving.
 
 *Skill: [`.cursor/skills/interrupts-and-exceptions/`](.cursor/skills/interrupts-and-exceptions/SKILL.md)*
 
-Right now the kernel runs with interrupts off and no IDT of its own. Any
-bug that trips a CPU exception has undefined, unrecoverable behavior (most
-likely a silent reboot). This phase turns "the kernel just froze" into a
-readable diagnostic, which makes every phase after it much faster to debug.
+Before this phase the kernel ran with interrupts off and no IDT of its own,
+so any bug that tripped a CPU exception had undefined, unrecoverable
+behavior (most likely a silent reboot). This phase turned "the kernel just
+froze" into a readable diagnostic, which makes every phase after it much
+faster to debug.
 
 - [x] **1.1 - Kernel-owned GDT.** Rewrite the GDT in Rust
       (`kernel/src/gdt.rs`), loaded at kernel startup, replacing reliance on
@@ -94,12 +95,27 @@ readable diagnostic, which makes every phase after it much faster to debug.
       banner reports the vector range it programmed alongside the masks it
       reads back; the remap itself was verified externally against QEMU's
       `info pic`, which shows `irq_base=20`/`irq_base=28` and `imr=ff` on both.
-- [ ] **1.6 - Enable interrupts.** Re-enable interrupts (`sti`) now that
+- [x] **1.6 - Enable interrupts.** Re-enable interrupts (`sti`) now that
       there's an IDT and PIC in a known state. Add a "spurious/unhandled
       interrupt" default handler for any vector without a real one yet, so
       an unexpected IRQ prints something instead of crashing.
       *Done when:* the kernel boots normally with interrupts enabled and
       idles (via `hlt`) without any unexpected crashes.
+      *Done as:* `kernel/src/interrupts.rs` fills all 252 vectors the
+      exception handlers don't own with a catch-all (one monomorphised entry
+      point per vector, so the report can name it, and the error-code shape on
+      exactly the vectors that push one), then runs `sti`. An unhandled CPU
+      exception is reported and halts - resuming would re-execute the faulting
+      instruction forever - while a stray IRQ or a software `int` to an unused
+      vector is reported once and resumed from, since taking the machine down
+      over one is worse than carrying on. That made `pic::end_of_interrupt`
+      part of this task rather than of the first driver: an IRQ left in service
+      blocks its own line and every lower-priority one, and the spurious
+      IRQ7/IRQ15 case must *not* be acknowledged at all. Verified with QEMU's
+      monitor reporting `EFL=...212` (IF set) with `HLT=1` and `isr=00` on both
+      PICs while the kernel idles, and against real unexpected interrupts via
+      the `trigger-unhandled-interrupt` / `-unhandled-exception` /
+      `-spurious-irq` features, in QEMU and v86 alike.
 
 ---
 
@@ -163,6 +179,17 @@ phase is really two new drivers, following that skill's conventions)
 
 Needs Phase 1 (interrupts) done first.
 
+- [ ] **3.0 - Make printing safe from interrupt context.** `vga::_print` and
+      `serial::_print` take a spin lock, so a handler that prints while the
+      interrupted code held that lock deadlocks instead of printing - and every
+      handler in the kernel prints. Nothing can hit this today (no IRQ line is
+      unmasked, so no interrupt can arrive mid-print), but 3.1 is precisely the
+      task that unmasks one. Give the writers a reentrancy-safe path (e.g.
+      `try_lock` with a fallback, or making handlers print without the lock)
+      before a handler starts printing on a real IRQ.
+      *Done when:* a handler that fires while a print is in progress reports
+      instead of hanging - verified deliberately, e.g. by raising an interrupt
+      from inside a print behind a `trigger-*` feature.
 - [ ] **3.1 - PIT (timer) driver.** Program the 8253/8254 PIT to a fixed
       frequency, add an IRQ0 handler that increments a tick counter.
       *Done when:* the kernel can print an increasing tick count (e.g.
