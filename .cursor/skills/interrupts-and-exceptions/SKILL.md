@@ -27,6 +27,9 @@ reports the exceptions an ordinary kernel bug is most likely to trip.
   (6), double fault (8), and general protection fault (13). Each prints the
   vector, faulting `eip`/`cs`/`eflags` (and the error code, for 13) to VGA
   *and* serial, then halts. No recovery, by design.
+- `kernel/src/pic.rs` - the two cascaded 8259 PICs, reprogrammed so IRQ0-15
+  raise vectors 32-47 instead of the BIOS's real-mode 8-15/0x70-0x77 (which
+  collide with the exception vectors), with every IRQ line then masked.
 - Debug-only `trigger-*` cargo features raise one of those exceptions on
   purpose, e.g. `make run KERNEL_FEATURES=trigger-divide-error` - the way to
   re-verify handler changes against a real fault instead of by inspection.
@@ -79,20 +82,35 @@ implement 32-bit hardware task switching, so `trigger-double-fault-gate`
 (a plain `int $8` through the same gate) is what proves the switch and the
 private stack in the browser demo, with output identical to QEMU's.
 
+## The PIC remap, and why the mask matters
+
+The 8259 initialization sequence (ICW1-ICW4 to ports 0x20/0x21 and 0xa0/0xa1)
+*clears* the interrupt mask register as a side effect, i.e. it leaves every IRQ
+line enabled. `pic::init` therefore writes 0xff back to both masks, and that is
+load-bearing rather than tidy: the PIT is ticking from the moment the machine
+powers on, so the first `sti` with an unmasked line would dispatch vector 32
+before anything has registered a handler for it. Each driver unmasks its own
+line once it has one.
+
+The programmed vector base cannot be read back - ICW2 is write-only - so the
+boot banner reports the range the kernel *programmed* next to the masks it
+actually read from the hardware. To check the remap from outside the kernel,
+ask QEMU: `-monitor unix:/tmp/mon.sock,server,nowait`, then `info pic` prints
+`irq_base=20`/`irq_base=28` and `imr=ff` for the two controllers (before the
+remap: `irq_base=08`/`irq_base=70`, with `imr=b8` - the BIOS leaves IRQ0, 1, 2
+and 6 enabled). A masked-but-latched IRQ shows up there as `irr=01`, which is
+the timer waiting for permission it will not get until roadmap task 1.6.
+
 ## What is still missing
 
-PIC remapping, `sti`, and a default handler for unregistered vectors - in that
-order (see `ROADMAP.md` phase 1).
+`sti`, and a default handler for unregistered vectors - in that order (see
+`ROADMAP.md` phase 1).
 
 ## Suggested order for the rest
 
-1. **PIC setup** to actually receive hardware interrupts (timer, keyboard).
-   Remap the legacy PIC's vectors so they don't collide with the CPU
-   exception vectors (0-31); that collision is a classic, well documented
-   gotcha.
-2. **Page fault (14)**, once paging exists - the error code and `CR2` say
+1. **Page fault (14)**, once paging exists - the error code and `CR2` say
    nearly everything about the bug that caused it.
-3. Once that's in place, a **timer (PIT) interrupt handler** and a
+2. Once that's in place, a **timer (PIT) interrupt handler** and a
    **keyboard interrupt handler** are natural next drivers (see the
    `drivers` skill).
 
