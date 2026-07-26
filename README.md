@@ -20,6 +20,10 @@ and a "hello world" on screen.
 - [ ] Graphics mode + a basic GUI
 - [ ] ...and much more, one step at a time.
 
+Each of those is a big milestone made of many small steps - see
+[**ROADMAP.md**](ROADMAP.md) for the breakdown of specific, individually
+shippable tasks that lead up to each one.
+
 ## How it works
 
 - **`boot/boot.asm`** is the entire bootloader: a 512-byte, hand-written
@@ -120,18 +124,11 @@ re-discovering.
 
 ## Next steps
 
-Roughly in order of dependency (see `.cursor/skills/` for detailed guidance
-on each):
-
-1. **GDT + IDT + exception handlers** so a bug in the kernel produces a
-   readable panic/double-fault message instead of a silent freeze.
-2. **Paging & a heap allocator** so the kernel can use dynamic memory
-   (`Vec`, `Box`, etc. via `alloc`).
-3. **Keyboard + timer interrupts** for interactive input and preemption.
-4. **A simple in-kernel shell / task scheduler.**
-5. **A graphics mode + basic GUI**, building on the same "write to a
-   buffer the BIOS/emulator already renders" idea the VGA text driver
-   already uses.
+Roughly in order of dependency: interrupts/exceptions, memory management,
+keyboard/timer input, a minimal shell, then a graphics mode + basic GUI.
+See [**ROADMAP.md**](ROADMAP.md) for that broken down into small, specific
+tasks with "done when" criteria, and `.cursor/skills/` for the deeper
+technical guidance behind each phase.
 
 Automations (scheduled/triggered agent runs building out the above) are a
 planned future addition once there's more of the OS built to give them
