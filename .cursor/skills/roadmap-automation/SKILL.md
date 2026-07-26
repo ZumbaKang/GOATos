@@ -75,23 +75,24 @@ right but the VGA output is garbled," for example.
 - If that was the **last** task in its phase, also check off the matching
   item in the README's `## Status` list.
 
-## 6. Commit, push, and open a non-draft PR
+## 6. Commit, push, and open a PR
 
 - Commit message: reference the task, e.g.
   `Phase 1.1: add kernel-owned GDT`.
 - Push the branch and open a PR against `main`.
-- **The PR must be created non-draft** (`draft: false`). CI still runs on
-  drafts, but the auto-merge job deliberately treats draft status as an
-  explicit "not ready" signal and skips merging - a draft PR will sit
-  there tested-but-unmerged until someone marks it ready.
 - Write a PR description that states which task this is, links to the
   `ROADMAP.md` entry, and briefly says how it was verified (step 4).
+- **A draft PR is fine.** The Cursor Automation's PR tool has no draft
+  option and creates drafts, so `ci.yml`'s `ready-for-review` job marks
+  `cursor/*` PRs in this repo ready automatically. Don't try to flip it by
+  hand - just don't count on the PR still being a draft a minute later.
 
-From here, `.github/workflows/ci.yml` takes over: it builds the kernel,
-runs `cargo clippy`, runs the boot test, and - only for branches matching
-`cursor/*`, and only if all of that passes - merges the PR automatically
-(squash + delete branch). If CI fails, the PR is left open for the next
-run (or a human) to fix; **never bypass a failing check to force a merge.**
+From here, `.github/workflows/ci.yml` takes over: it takes the PR out of
+draft, builds the kernel, runs `cargo clippy`, runs the boot test, and -
+only for `cursor/*` branches in this repository, and only if all of that
+passes - merges the PR automatically (squash + delete branch). If CI fails,
+the PR is left open for the next run (or a human) to fix; **never bypass a
+failing check to force a merge.**
 
 ## Setting up the Automation itself
 
@@ -111,5 +112,5 @@ repo file. When setting one up for this repo:
   fallback in case the chain ever stalls (a failed/blocked PR, no
   unchecked tasks left, etc.).
 - Make sure "Pull request creation" is enabled for the automation (it is
-  by default) and that it's allowed to create **non-draft** PRs, per step 6
-  above.
+  by default). Whether it creates drafts doesn't matter - `ci.yml` marks
+  `cursor/*` PRs ready itself, per step 6 above.

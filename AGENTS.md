@@ -40,10 +40,13 @@ kernel's sector count), and concatenates them into `build/disk.img`. See
 
 `.github/workflows/ci.yml` runs `cargo clippy` + `make test` on every PR and
 push to `main`, then auto-merges (squash) any PR from a `cursor/*` branch
-that passes. This is what lets the OS build itself out via a scheduled/
-triggered Cursor Automation picking tasks off `ROADMAP.md` — see
-`.cursor/skills/roadmap-automation/SKILL.md` for the full procedure an
-agent (automated or not) should follow.
+that passes. Because the Cursor Automation's PR tool can only open drafts —
+which auto-merge refuses to touch — the same workflow first marks `cursor/*`
+PRs ready for review (the `ready-for-review` job); draft still means "not
+ready" for human PRs and for anything from a fork. This is what lets the OS
+build itself out via a scheduled/triggered Cursor Automation picking tasks
+off `ROADMAP.md` — see `.cursor/skills/roadmap-automation/SKILL.md` for the
+full procedure an agent (automated or not) should follow.
 
 ### Running / testing gotchas
 

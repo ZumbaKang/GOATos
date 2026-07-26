@@ -116,9 +116,10 @@ rebuilds and republishes it to GitHub Pages automatically on every push to
 
 Every PR is built, linted (`cargo clippy`), and boot-tested headlessly in
 QEMU by [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (the same
-check as `make test` locally). PRs from a `cursor/*` branch are merged
-automatically (squash + delete branch) once that passes - PRs on other
-branch names are left for manual review.
+check as `make test` locally). PRs from a `cursor/*` branch are taken out of
+draft and then merged automatically (squash + delete branch) once that
+passes - PRs on other branch names, and any PR from a fork, are left for
+manual review.
 
 That auto-merge is what makes it possible for GOATos to build itself out
 with minimal supervision: a [Cursor Automation](https://cursor.com/automations)
