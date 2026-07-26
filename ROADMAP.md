@@ -127,7 +127,7 @@ No paging, no heap, no `alloc` yet - only `core`. This phase unblocks
 almost everything after it (a real scheduler, filesystem, and shell all
 want `Vec`/`Box`/`String`).
 
-- [ ] **2.1 - BIOS memory map at boot time.** Have `boot/boot.asm` query
+- [x] **2.1 - BIOS memory map at boot time.** Have `boot/boot.asm` query
       `INT 15h, EAX=0xE820` for the memory map and stash the resulting list
       at a fixed, pre-agreed address for the kernel to read on startup
       (same spirit as how it already hands off control to `kernel_main`,
@@ -135,6 +135,16 @@ want `Vec`/`Box`/`String`).
       *Done when:* the kernel can print the discovered memory regions
       (address + length + type) over serial and they look sane for the
       disk image's configured RAM size.
+      *Done as:* `detect_memory` in `boot/boot.asm` walks E820 in real mode -
+      the only time the BIOS is reachable - and writes a signature, an entry
+      count and up to 32 raw 24-byte entries to 0x500, in the low-memory
+      scratch area nothing else claims. `kernel/src/memory/map.rs` validates
+      that block and reports it: every region over serial, a one-line summary
+      on screen. The signature is what lets a BIOS with no E820 support be
+      reported as `MEMORY MAP UNAVAILABLE` instead of being mistaken for a
+      machine with no RAM. The numbers track the emulator they run on - 127
+      MiB usable under QEMU's 128MiB default, 31 MiB under the web demo's
+      32MiB v86 - which is the real proof they come from the BIOS.
 - [ ] **2.2 - Physical frame allocator.** A simple bump or free-list
       allocator over the usable regions from 2.1, operating in 4KiB frames.
       *Done when:* the kernel can allocate and free a handful of frames and
