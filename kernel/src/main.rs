@@ -24,6 +24,7 @@ use core::panic::PanicInfo;
 pub mod exceptions;
 pub mod gdt;
 pub mod idt;
+pub mod interrupts;
 pub mod pic;
 pub mod serial;
 pub mod tss;
@@ -114,6 +115,17 @@ pub extern "C" fn kernel_main() -> ! {
         pic_masking
     );
 
+    // Give every remaining vector somewhere to land before letting the CPU
+    // deliver anything: an interrupt on a vector with no gate would escalate
+    // straight to a double fault, so "interrupts on" and "no gaps in the IDT"
+    // have to happen together.
+    let spare_vectors = interrupts::init();
+    vga_println!(
+        "Interrupts: catch-all on {} spare vectors, {} owned",
+        spare_vectors,
+        idt::ENTRY_COUNT - spare_vectors
+    );
+
     serial_println!(
         "GDT: kernel-owned at {:#010x} (limit {:#x}), cs={:#04x} ds={:#04x} tr={:#04x}",
         gdt.base,
@@ -144,12 +156,37 @@ pub extern "C" fn kernel_main() -> ! {
         pic.slave_mask,
         pic_masking
     );
+    serial_println!(
+        "Interrupts: catch-all on {} spare vectors, {} owned",
+        spare_vectors,
+        idt::ENTRY_COUNT - spare_vectors
+    );
+
+    // The last piece of setup, and the first moment the kernel can be
+    // interrupted at all. The masks are re-read afterwards because they are
+    // what makes this uneventful: every IRQ line is still disabled, so nothing
+    // is delivered until a driver asks for its own line.
+    interrupts::enable();
+    let pic = pic::state();
+    diag_println!(
+        "Interrupts: enabled (IF={}), IMR {:#04x}/{:#04x}, {} unhandled",
+        u8::from(interrupts::enabled()),
+        pic.master_mask,
+        pic.slave_mask,
+        interrupts::unhandled_count()
+    );
+
     serial_println!("GOATos booted successfully! (32-bit, from a hand-written bootloader)");
 
-    // Compiles to nothing unless a `trigger-*` feature is enabled, which is
-    // how the handlers above get verified against a real exception.
+    // Both compile to nothing unless a `trigger-*` feature is enabled, which is
+    // how the handlers above get verified against a real exception and a real
+    // unexpected interrupt.
     exceptions::trigger_debug_exception();
+    interrupts::trigger_debug_interrupt();
 
+    // With every IRQ line masked there is nothing left to wake the CPU, so this
+    // is where the kernel stays: idle in `hlt`, ready to report anything that
+    // arrives anyway.
     hlt_loop();
 }
 

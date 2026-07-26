@@ -13,7 +13,11 @@ and a "hello world" on screen.
 - [x] **Boots live in a browser** via [v86](https://github.com/copy/v86) -
       the exact same disk image QEMU boots for local testing. See
       [Web demo](#web-demo) below.
-- [ ] Interrupts (GDT / IDT), exception handling
+- [x] **Interrupts and exception handling**: a kernel-owned GDT/IDT, readable
+      crash reports for the CPU exceptions a kernel bug is likely to trip (a
+      double fault on a stack of its own, via a TSS and task gate), both 8259
+      PICs remapped clear of the exception vectors, and interrupts enabled with
+      a catch-all for any vector nothing owns yet.
 - [ ] Physical & virtual memory management (paging, a heap allocator)
 - [ ] Keyboard input
 - [ ] A minimal shell

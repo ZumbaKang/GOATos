@@ -13,8 +13,8 @@
 //!   instruction, the usual symptom of a jump to a bad address or of
 //!   overwritten code,
 //! - general protection fault (13) - a catch-all for illegal segment,
-//!   privilege, and descriptor-table use; also what an unregistered vector
-//!   raises, so it covers "took an interrupt nothing handles" too.
+//!   privilege, and descriptor-table use, and also what a vector with no gate
+//!   at all raises (which is why [`crate::interrupts`] leaves none).
 //! - double fault (8) - the CPU could not deliver one of the above. This one
 //!   is special: it runs as a separate hardware task so that it has a stack of
 //!   its own (see [`crate::tss`]), because the whole reason a double fault
@@ -27,9 +27,10 @@
 //!
 //! Known limitation: reporting goes through the VGA writer's lock, so an
 //! exception raised *while that lock is held* (i.e. from inside a print)
-//! deadlocks instead of reporting. Nothing on the current code paths prints
-//! from interrupt context, so this stays a latent concern rather than a live
-//! one.
+//! deadlocks instead of reporting. Interrupts are enabled now, which makes
+//! that reachable in principle - but every IRQ line is still masked, so
+//! nothing can interrupt a print. The first driver to unmask a line is what
+//! makes it real; see `ROADMAP.md` task 3.0.
 
 use core::arch::asm;
 
@@ -40,6 +41,11 @@ use crate::tss;
 /// Prints to both output surfaces: VGA because it is the primary display (and
 /// the only one a browser visitor or a real monitor sees), serial because it
 /// is the one a headless QEMU and CI can read.
+///
+/// Exported for the other diagnostic path, [`crate::interrupts`]: every crash
+/// or "this should not have happened" report wants both surfaces, and wants
+/// them in this order.
+#[macro_export]
 macro_rules! diag_println {
     ($($arg:tt)*) => {{
         $crate::vga_println!($($arg)*);
