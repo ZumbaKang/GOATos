@@ -40,6 +40,11 @@ use crate::tss;
 /// Prints to both output surfaces: VGA because it is the primary display (and
 /// the only one a browser visitor or a real monitor sees), serial because it
 /// is the one a headless QEMU and CI can read.
+///
+/// Exported for the other diagnostic path, [`crate::interrupts`]: every crash
+/// or "this should not have happened" report wants both surfaces, and wants
+/// them in this order.
+#[macro_export]
 macro_rules! diag_println {
     ($($arg:tt)*) => {{
         $crate::vga_println!($($arg)*);

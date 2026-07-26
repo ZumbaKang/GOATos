@@ -29,6 +29,14 @@ trigger-double-fault = []
 # proves the task gate and private stack under emulators that don't implement
 # turning a failed exception delivery into a double fault (v86).
 trigger-double-fault-gate = []
+# Takes a vector nothing has registered (0x60), which the catch-all handler
+# should report and then *resume* from - unlike an exception, a stray interrupt
+# is not fatal (see `interrupts::trigger_debug_interrupt`).
+trigger-unhandled-interrupt = []
+# Takes vector 39, the line an 8259 raises when it has an interrupt it cannot
+# attribute to any IRQ: the handler must recognise it from the in-service
+# register and *not* acknowledge it.
+trigger-spurious-irq = []
 
 [profile.dev]
 panic = "abort"

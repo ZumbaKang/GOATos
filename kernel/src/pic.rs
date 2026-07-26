@@ -13,10 +13,15 @@
 //! [`IRQ_VECTOR_BASE`]`..=`[`IRQ_VECTOR_LAST`] (32-47), immediately above the
 //! 32 vectors Intel reserves for exceptions, and then every IRQ line is
 //! masked. Masking matters because remapping is not the same as being ready:
-//! the PIT is already ticking at boot, so the moment interrupts are enabled
-//! (roadmap task 1.6) an unmasked line would dispatch through the IDT to a
-//! vector nothing has registered yet. Leaving the mask at 0xff means each
-//! driver unmasks its own line when it actually has a handler.
+//! the PIT is already ticking at boot, so the moment interrupts are enabled an
+//! unmasked line would dispatch through the IDT to a vector nothing has
+//! registered yet. Leaving the mask at 0xff means each driver unmasks its own
+//! line when it actually has a handler.
+//!
+//! Interrupts *are* enabled now (see [`crate::interrupts`]), so this module
+//! also provides the other half of servicing an IRQ: [`end_of_interrupt`],
+//! which tells the controllers the line has been dealt with and they may raise
+//! it again.
 
 use core::arch::asm;
 use spin::Mutex;
@@ -62,6 +67,23 @@ const ICW3_SLAVE_IDENTITY: u8 = 2;
 /// ICW4: 8086/8088 mode. Without it the controller stays in MCS-80/85 mode
 /// and delivers a call address rather than a vector number.
 const ICW4_8086_MODE: u8 = 0x01;
+
+/// OCW2: non-specific end of interrupt - clears the highest-priority bit that
+/// is set in the in-service register, which is the IRQ currently being
+/// handled. Until it is written, that line and every lower-priority one stay
+/// blocked.
+const OCW2_END_OF_INTERRUPT: u8 = 0x20;
+/// OCW3: make the next read of the command port return the in-service
+/// register, i.e. which IRQs the controller thinks are being handled right
+/// now. Used to tell a real IRQ from a spurious one.
+const OCW3_READ_IN_SERVICE: u8 = 0x0b;
+
+/// The lowest-priority line on each controller, and so the one a spurious
+/// interrupt is reported on: when a line asserts just long enough to make the
+/// 8259 raise INTR and then drops before the CPU acknowledges it, the
+/// controller has no vector to supply and substitutes its IRQ7 (master) or
+/// IRQ15 (slave).
+const SPURIOUS_LINE: u8 = 7;
 
 /// Mask value that disables every line on a controller.
 const MASK_ALL: u8 = 0xff;
@@ -118,6 +140,82 @@ impl Pic {
         // IMR and has no side effects on the controller.
         unsafe { inb(self.data) }
     }
+}
+
+/// Whether `vector` is one of the ones [`init`] pointed the IRQ lines at, and
+/// if so which line raised it.
+pub fn irq_of_vector(vector: u8) -> Option<u8> {
+    if (IRQ_VECTOR_BASE..=IRQ_VECTOR_LAST).contains(&vector) {
+        Some(vector - IRQ_VECTOR_BASE)
+    } else {
+        None
+    }
+}
+
+/// What [`end_of_interrupt`] found the IRQ to be.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Acknowledged {
+    /// A real IRQ, now acknowledged: the controllers may raise it again.
+    Serviced,
+    /// A spurious IRQ - the controller raised INTR but had no line still
+    /// asserted to attribute it to, so it substituted its lowest-priority
+    /// vector. There is nothing in service to acknowledge, and sending an EOI
+    /// anyway would clear a *different*, genuinely in-service IRQ.
+    Spurious,
+}
+
+/// Tells the controllers that the IRQ which raised `irq` has been serviced, so
+/// that line (and every lower-priority one) can be raised again.
+///
+/// Returns [`Acknowledged::Spurious`] for a phantom interrupt, which must not
+/// be acknowledged as if it were real - see [`Acknowledged`]. For a spurious
+/// *slave* interrupt the master still gets an EOI, because from its side the
+/// cascade line really was in service.
+///
+/// Deliberately takes no lock, unlike the rest of this module: it runs in
+/// interrupt context, where blocking on a lock the interrupted code happens to
+/// hold would hang the kernel outright. It doesn't need one either - the ports
+/// and the bytes written are fixed constants, so there is no shared state here
+/// to protect.
+pub fn end_of_interrupt(irq: u8) -> Acknowledged {
+    let from_slave = irq >= 8;
+    let line = irq % 8;
+
+    // Only the lowest-priority line of a controller can be spurious, so this
+    // is the only case worth an extra pair of port accesses.
+    if line == SPURIOUS_LINE {
+        let command = if from_slave {
+            SLAVE_COMMAND
+        } else {
+            MASTER_COMMAND
+        };
+        // SAFETY: OCW3 selects which register the *next* read of the command
+        // port returns; neither the write nor the read changes what the
+        // controller is doing.
+        let in_service = unsafe {
+            outb(command, OCW3_READ_IN_SERVICE);
+            inb(command) & (1 << line) != 0
+        };
+        if !in_service {
+            if from_slave {
+                // SAFETY: as below - the master's cascade line is genuinely in
+                // service even when the slave's interrupt turns out not to be.
+                unsafe { outb(MASTER_COMMAND, OCW2_END_OF_INTERRUPT) };
+            }
+            return Acknowledged::Spurious;
+        }
+    }
+
+    // SAFETY: OCW2 to a command port only clears an in-service bit, and the
+    // slave has to be cleared before the master, or the master unblocks the
+    // cascade line while the slave still thinks it is being serviced.
+    unsafe {
+        if from_slave {
+            outb(SLAVE_COMMAND, OCW2_END_OF_INTERRUPT);
+        }
+        outb(MASTER_COMMAND, OCW2_END_OF_INTERRUPT);
+    }
+    Acknowledged::Serviced
 }
 
 struct ChainedPics {

@@ -8,12 +8,12 @@
 //!
 //! This module is only the scaffolding for that: the 256-entry table, a way
 //! to register a handler for a vector, and the `lidt` that hands the table to
-//! the CPU. It deliberately installs *no* handlers - every vector is left
-//! "not present" - so behaviour is unchanged until real handlers land. That
-//! is safe today only because interrupts are still masked (`cli` in
-//! `boot/boot.asm`, never re-enabled) and the kernel isn't executing anything
-//! that faults; both of those change in later phases, which is exactly when
-//! the handlers arrive.
+//! the CPU. It deliberately installs *no* handlers - [`init`] leaves every
+//! vector "not present" - so what the table does is entirely up to its
+//! callers: [`crate::exceptions`] registers the faults worth reporting
+//! individually, and [`crate::interrupts`] fills the remaining gaps with a
+//! catch-all before enabling interrupts, since a not-present vector is one
+//! stray interrupt away from a double fault.
 
 use core::arch::asm;
 use core::cell::UnsafeCell;
@@ -259,6 +259,18 @@ pub unsafe fn set_task_gate(vector: u8, tss_selector: u16) {
     // SAFETY: as for `init` - single-threaded, interrupts masked.
     let idt = unsafe { &mut *IDT.0.get() };
     idt.entries[vector as usize] = Gate::task(tss_selector);
+}
+
+/// Whether `vector` currently has anything registered for it - a handler
+/// function or a task gate.
+///
+/// Lets [`crate::interrupts`] fill only the vectors nothing owns yet, without
+/// having to know which ones [`crate::exceptions`] claimed.
+pub fn has_handler(vector: u8) -> bool {
+    // SAFETY: as for `init` - single-threaded, and a read of one gate cannot
+    // observe a torn write when nothing is writing.
+    let idt = unsafe { &*IDT.0.get() };
+    idt.entries[vector as usize].is_present()
 }
 
 /// Removes any handler for `vector`, leaving it "not present" as [`init`] found
