@@ -112,6 +112,23 @@ python3 -m http.server -d _site 8080
 rebuilds and republishes it to GitHub Pages automatically on every push to
 `main`.
 
+## Continuous integration & automated development
+
+Every PR is built, linted (`cargo clippy`), and boot-tested headlessly in
+QEMU by [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (the same
+check as `make test` locally). PRs from a `cursor/*` branch are merged
+automatically (squash + delete branch) once that passes - PRs on other
+branch names are left for manual review.
+
+That auto-merge is what makes it possible for GOATos to build itself out
+with minimal supervision: a [Cursor Automation](https://cursor.com/automations)
+can pick up the next task from [`ROADMAP.md`](ROADMAP.md), implement it,
+and open a PR; if CI passes, it merges on its own, and the next run picks
+up the next task. See
+[`.cursor/skills/roadmap-automation/`](.cursor/skills/roadmap-automation/SKILL.md)
+for the exact procedure (and for how to set the Automation itself up - that
+part happens in the Cursor dashboard, not a repo file).
+
 ## Skills
 
 This repo uses [Cursor Agent Skills](https://cursor.com/docs/skills) to

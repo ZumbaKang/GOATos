@@ -14,6 +14,8 @@
 #                      terminal
 #   make run-display - like `run`, but with a graphical QEMU window instead
 #                      of headless serial-only output
+#   make test        - build the disk image, boot it headlessly, and check
+#                      the serial output for a successful boot (used by CI)
 #   make clean       - remove all build artifacts
 
 PROFILE ?= dev
@@ -33,7 +35,7 @@ DISK_IMG := $(BUILD_DIR)/disk.img
 # CHS geometry, even though our own boot code only ever uses LBA addressing.
 MIN_DISK_SIZE_BYTES := 10485760 # 10 MiB
 
-.PHONY: all kernel disk run run-display clean
+.PHONY: all kernel disk run run-display test clean
 
 all: kernel
 
@@ -60,6 +62,9 @@ run: $(DISK_IMG)
 
 run-display: $(DISK_IMG)
 	qemu-system-i386 -drive file=$(DISK_IMG),format=raw -serial stdio
+
+test:
+	./scripts/ci-test.sh
 
 clean:
 	rm -rf $(BUILD_DIR)
