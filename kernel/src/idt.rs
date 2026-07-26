@@ -41,6 +41,12 @@ const GATE_32BIT_INTERRUPT: u8 = 0xe;
 /// This is the same-privilege-level layout. An interrupt that crosses rings
 /// also pushes the interrupted `esp`/`ss` above `eflags`, which can't happen
 /// yet - there is no ring 3, and no separate stack per privilege level.
+///
+/// Handlers must take this **by value**, not as a pointer: an
+/// `extern "x86-interrupt"` parameter is materialised from the interrupt
+/// frame itself, so a pointer parameter is read *out of* the frame (yielding
+/// the interrupted `eip`) instead of pointing *at* it. Passing the struct by
+/// value makes it indirect, which is what lines the two up.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct StackFrame {
@@ -58,13 +64,13 @@ pub struct StackFrame {
 /// the compiler emits a prologue that preserves every register the handler
 /// touches and an `iret` epilogue, instead of the ordinary `ret` that would
 /// leave the interrupt frame on the stack.
-pub type Handler = extern "x86-interrupt" fn(*mut StackFrame);
+pub type Handler = extern "x86-interrupt" fn(StackFrame);
 
 /// A handler for a vector that pushes an error code - on 32-bit x86: double
 /// fault (8), invalid TSS (10), segment-not-present (11), stack-segment fault
 /// (12), general protection fault (13), page fault (14), alignment check
 /// (17), control protection (21).
-pub type HandlerWithErrorCode = extern "x86-interrupt" fn(*mut StackFrame, u32);
+pub type HandlerWithErrorCode = extern "x86-interrupt" fn(StackFrame, u32);
 
 /// One 8-byte IDT gate. Unlike a GDT descriptor, the fields are byte-aligned
 /// rather than scattered across the quadword, so a plain `repr(C)` struct
