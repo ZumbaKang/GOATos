@@ -1,4 +1,8 @@
 /target
 /kernel/target
+/build
+/_site
 *.img
 *.iso
+*.bin
+node_modules/
