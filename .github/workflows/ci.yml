@@ -3,6 +3,10 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # The default types plus `ready_for_review`, so that marking a PR ready
+    # (by hand, or by the `ready-for-review` job below) runs the checks and
+    # reaches the auto-merge gate instead of leaving it tested-but-stranded.
+    types: [opened, reopened, synchronize, ready_for_review]
   push:
     branches: [main]
 
@@ -32,27 +36,62 @@ jobs:
       - name: Build + boot test
         run: make test
 
-  # Merges the PR automatically once `test` passes, but only for
-  # non-draft PRs on branches following this project's `cursor/*`
-  # convention (i.e. opened by an automation/agent following
-  # .cursor/skills/roadmap-automation). Human PRs on other branch names,
-  # and *any* PR deliberately left as a draft, are left for manual
-  # review/merge - draft status is treated as an explicit "not ready"
-  # signal that this workflow must never override.
-  auto-merge:
-    needs: test
+  # Takes `cursor/*` PRs out of draft. The Cursor Automation that opens them
+  # can only create drafts, and the auto-merge job below refuses to merge a
+  # draft, so without this every automated PR sits tested-but-unmerged until
+  # a human clicks "Ready for review". Deliberately scoped to `cursor/*`
+  # branches in this repository: draft status still means "not ready" for
+  # human PRs and for anything from a fork.
+  ready-for-review:
     if: >
       github.event_name == 'pull_request' &&
-      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.head_ref, 'cursor/')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Mark the pull request ready for review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$(gh pr view "$PR_NUMBER" --repo "$REPO" --json isDraft --jq .isDraft)" = "true" ]; then
+            gh pr ready "$PR_NUMBER" --repo "$REPO"
+          else
+            echo "Already ready for review; nothing to do."
+          fi
+
+  # Merges the PR automatically once `test` passes, but only for PRs on
+  # branches following this project's `cursor/*` convention (i.e. opened by an
+  # automation/agent following .cursor/skills/roadmap-automation) that live in
+  # this repository. Human PRs on other branch names, and anything from a
+  # fork, are left for manual review/merge.
+  auto-merge:
+    needs: [test, ready-for-review]
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.head_ref, 'cursor/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
     steps:
+      # Draft status is still an absolute "do not merge", but it has to be
+      # re-read here rather than taken from the event payload: that payload
+      # predates the `ready-for-review` job. A PR that is somehow still a
+      # draft at this point (e.g. that job failed) is left alone.
       - name: Merge pull request
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-        run: gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch
+        run: |
+          if [ "$(gh pr view "$PR_NUMBER" --repo "$REPO" --json isDraft --jq .isDraft)" = "true" ]; then
+            echo "Pull request is still a draft; leaving it for manual review." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch
