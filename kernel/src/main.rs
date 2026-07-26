@@ -16,6 +16,7 @@
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 
+pub mod gdt;
 pub mod serial;
 pub mod vga;
 
@@ -34,10 +35,31 @@ pub extern "C" fn kernel_main() -> ! {
     vga_println!("hardware (and browser emulators like v86) render -");
     vga_println!("what you see here is what a web visitor would see.");
 
+    // Take over segmentation from the bootloader's throwaway GDT. Printing
+    // first means a botched GDT load shows up as "the banner is on screen but
+    // nothing after it" rather than as a completely blank screen.
+    gdt::init();
+    let gdt = gdt::loaded();
+    vga_println!("");
+    vga_println!(
+        "GDT: kernel-owned at {:#010x} (limit {:#x}), cs={:#04x} ds={:#04x}",
+        gdt.base,
+        gdt.limit,
+        gdt.cs,
+        gdt.ds
+    );
+
     // Serial output is best-effort: useful for headless QEMU/CI, but its
     // absence must never affect anything above.
     serial::init();
     serial_println!("GOATos booted successfully! (32-bit, from a hand-written bootloader)");
+    serial_println!(
+        "GDT: kernel-owned at {:#010x} (limit {:#x}), cs={:#04x} ds={:#04x}",
+        gdt.base,
+        gdt.limit,
+        gdt.cs,
+        gdt.ds
+    );
 
     hlt_loop();
 }
