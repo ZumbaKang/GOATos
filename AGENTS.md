@@ -2,40 +2,50 @@
 
 ## Cursor Cloud specific instructions
 
-GOATos is a from-scratch bare-metal x86_64 OS kernel written in Rust. It is a
-Cargo workspace with two crates: `kernel/` (the `#![no_std]` OS, built for the
-`x86_64-unknown-none` target) and the root `goatos` runner (`build.rs` +
-`src/main.rs`), which builds bootable BIOS/UEFI disk images and boots the BIOS
-image in QEMU. See `README.md` for the full build/run flow.
+GOATos is a from-scratch 32-bit x86 OS kernel written in Rust, booted by a
+hand-written MBR bootloader (`boot/boot.asm`) — no GRUB, no bootloader crate.
+The `Makefile` orchestrates the build: it compiles the `kernel/` crate for the
+custom bare-metal target `kernel/i686-goatos.json`, flattens the ELF to a raw
+binary with `objcopy`, assembles the boot sector with `nasm` (baking in the
+kernel's sector count), and concatenates them into `build/disk.img`. See
+`README.md` and `.cursor/skills/` for full details.
 
 ### Environment notes
 
-- The Rust nightly toolchain, the `x86_64-unknown-none` target, and the
-  `llvm-tools-preview`/`rust-src` components are pinned in
-  `rust-toolchain.toml` and auto-installed by rustup on first build.
-- **QEMU (`qemu-system-x86_64`) is a required system dependency** that is NOT
-  managed by Cargo. It is installed during environment setup
-  (`apt-get install -y qemu-system-x86`) and baked into the VM snapshot, so it
-  is not part of the update script. If `cargo run` fails with "failed to start
-  `qemu-system-x86_64`", reinstall QEMU.
+- The Rust nightly toolchain and the `rust-src`/`llvm-tools-preview`
+  components are pinned in `rust-toolchain.toml` and auto-installed by rustup.
+  The kernel builds with `build-std` and a JSON target spec (see
+  `kernel/.cargo/config.toml`), so no prebuilt `std`/target is needed.
+- **System dependencies (NOT managed by Cargo), installed during environment
+  setup and baked into the VM snapshot — so they are not in the update
+  script:**
+  - `nasm` — assembles `boot/boot.asm`.
+  - `binutils` (`objcopy`) — flattens the kernel ELF into a raw binary.
+  - `qemu-system-i386` (from `qemu-system-x86`) — boots the disk image.
+  - The web demo additionally uses `node`/`npm` (fetch v86 runtime), `curl`
+    (fetch v86 BIOS blobs), and `python3` (serve the site) — all preinstalled.
 
 ### Build / lint / run
 
-- Build: `cargo build` (see `README.md`).
-- Lint: `cargo clippy` (clean). Note: `cargo fmt --check` currently reports a
-  pre-existing formatting diff in `src/main.rs`; do not "fix" it unless asked.
-- Run: `cargo run` (see `README.md`). This boots the kernel in QEMU headlessly
-  (`-display none`) and forwards COM1 serial to stdio.
+- Build kernel + disk image: `make disk` (or `make` for just the kernel). See
+  the `Makefile` for all targets.
+- Lint: `cd kernel && cargo clippy` (clean).
+- Run: `make run` — boots headlessly in QEMU, forwarding COM1 serial to stdio.
+  `make run-display` opens a graphical window (needs a display).
 
 ### Running / testing gotchas
 
-- **The kernel never exits.** After printing its boot message it halts in an
-  infinite `hlt` loop, so `cargo run` (and QEMU) run forever. To capture output
-  non-interactively, wrap it in a timeout, e.g.
-  `timeout 20 cargo run 2>&1`, or stop it with `Ctrl-C`.
-- A successful boot prints, over serial:
-  `GOATos booted successfully!` followed by
-  `bootloader reported N memory region(s)`. The lines prefixed with `INFO :`
-  come from the bootloader, not the kernel.
-- There is no framebuffer/display output yet, so QEMU is run headlessly; do not
-  expect a GUI window.
+- **The kernel never exits.** After printing it halts in an infinite loop, so
+  `make run` (and QEMU) run forever. When scripting a check, wrap it in a
+  timeout, e.g. `timeout 15 make run`, and confirm the expected line printed.
+- Successful boot prints over serial:
+  `GOATos booted successfully! (32-bit, from a hand-written bootloader)`.
+  VGA text output is the *primary* surface (serial is a headless copy); to
+  prove VGA rendering, capture a screenshot via the QEMU monitor as documented
+  in `.cursor/skills/qemu-testing-and-verification/SKILL.md`. Converting the
+  resulting `.ppm` needs Pillow/ImageMagick (Pillow is available via `pip`;
+  ImageMagick/netpbm are not preinstalled).
+- Web demo: `./scripts/build-web-demo.sh` builds `build/disk.img` and assembles
+  a static site in `_site/` (fetches v86 via npm + BIOS blobs via curl — needs
+  network). Serve with `python3 -m http.server -d _site 8080`; the exact same
+  `disk.img` QEMU boots also boots in-browser via v86.
