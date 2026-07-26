@@ -80,9 +80,10 @@ right but the VGA output is garbled," for example.
 - Commit message: reference the task, e.g.
   `Phase 1.1: add kernel-owned GDT`.
 - Push the branch and open a PR against `main`.
-- **The PR must be created non-draft** (`draft: false`). The auto-merge
-  workflow only merges PRs that are ready for review; a draft PR will sit
-  there untested-and-unmerged until someone notices.
+- **The PR must be created non-draft** (`draft: false`). CI still runs on
+  drafts, but the auto-merge job deliberately treats draft status as an
+  explicit "not ready" signal and skips merging - a draft PR will sit
+  there tested-but-unmerged until someone marks it ready.
 - Write a PR description that states which task this is, links to the
   `ROADMAP.md` entry, and briefly says how it was verified (step 4).
 
