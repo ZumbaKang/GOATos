@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GOATos - live in your browser</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0e0a;
+      --fg: #b7ffb7;
+      --accent: #39ff6a;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "JetBrains Mono", "Fira Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem 3rem;
+      box-sizing: border-box;
+    }
+    h1 {
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      margin: 0 0 0.25rem;
+    }
+    p.subtitle {
+      margin: 0 0 1.5rem;
+      opacity: 0.75;
+      max-width: 40rem;
+      text-align: center;
+    }
+    #screen_container {
+      background: #000;
+      border: 2px solid var(--accent);
+      box-shadow: 0 0 24px rgba(57, 255, 106, 0.25);
+      padding: 0;
+      line-height: 0;
+    }
+    #status {
+      margin-top: 1rem;
+      opacity: 0.8;
+      min-height: 1.2em;
+    }
+    a {
+      color: var(--accent);
+    }
+    footer {
+      margin-top: 2rem;
+      opacity: 0.6;
+      font-size: 0.85rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>GOATos</h1>
+  <p class="subtitle">
+    A from-scratch x86 kernel with its own hand-written bootloader (no GRUB,
+    no BIOS assistance beyond what every PC provides), booting live in your
+    browser via <a href="https://github.com/copy/v86" target="_blank" rel="noopener">v86</a>.
+    No install, no server - this is the exact same disk image QEMU boots for testing.
+  </p>
+  <div id="screen_container">
+    <div style="white-space: pre; font: 14px monospace; color: #ccc"></div>
+    <canvas style="display: none"></canvas>
+  </div>
+  <div id="status">Loading emulator...</div>
+  <footer>
+    <a href="https://github.com/ZumbaKang/GOATos" target="_blank" rel="noopener">Source on GitHub</a>
+  </footer>
+
+  <script src="v86/libv86.js"></script>
+  <script>
+    const status = document.getElementById("status");
+
+    const emulator = new V86({
+      wasm_path: "v86/v86.wasm",
+      screen_container: document.getElementById("screen_container"),
+      bios: { url: "v86/seabios.bin" },
+      vga_bios: { url: "v86/vgabios.bin" },
+      hda: { url: "disk.img" },
+      memory_size: 32 * 1024 * 1024,
+      vga_memory_size: 2 * 1024 * 1024,
+      autostart: true,
+    });
+
+    emulator.add_listener("emulator-started", () => {
+      status.textContent = "Booting GOATos...";
+    });
+
+    emulator.add_listener("emulator-loaded", () => {
+      status.textContent = "";
+    });
+  </script>
+</body>
+</html>
