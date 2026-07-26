@@ -88,8 +88,9 @@ extern "x86-interrupt" fn general_protection_fault(frame: StackFrame, error_code
 /// Prints what the CPU reported about the exception, then halts for good.
 ///
 /// `eip` is the faulting instruction itself for all three vectors here (they
-/// are faults, not traps), so it can be matched straight against a
-/// disassembly of `build/kernel.bin`.
+/// are faults, not traps), so it can be matched straight against
+/// `objdump -d kernel/target/i686-goatos/debug/kernel` - the kernel is loaded
+/// at the address the linker script gives it, so no rebasing is needed.
 fn report(vector: u8, name: &str, error_code: Option<u32>, frame: &StackFrame) -> ! {
     diag_println!("");
     diag_println!("*** CPU EXCEPTION #{}: {}", vector, name);
