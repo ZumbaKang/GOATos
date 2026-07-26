@@ -14,6 +14,14 @@ Each phase also has a matching skill under
 [`.cursor/skills/`](.cursor/skills/) with deeper technical guidance,
 conventions, and gotchas - read it before starting the phase.
 
+**This is automated end-to-end.** A [Cursor Automation](https://cursor.com/automations)
+runs [`.cursor/skills/roadmap-automation/`](.cursor/skills/roadmap-automation/SKILL.md)
+to pick up the next unchecked task here, implement it, and open a PR;
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) builds, lints, and
+boot-tests every PR and auto-merges it if that passes. You can still do a
+task manually (same procedure) at any time - the automation just means
+the OS keeps building itself out even when no one's driving.
+
 ---
 
 ## Phase 0 - Done

@@ -29,9 +29,21 @@ kernel's sector count), and concatenates them into `build/disk.img`. See
 
 - Build kernel + disk image: `make disk` (or `make` for just the kernel). See
   the `Makefile` for all targets.
-- Lint: `cd kernel && cargo clippy` (clean).
+- Lint: `cd kernel && cargo clippy -- -D warnings` (clean — this is a CI gate).
 - Run: `make run` — boots headlessly in QEMU, forwarding COM1 serial to stdio.
   `make run-display` opens a graphical window (needs a display).
+- Test (what CI runs): `make test` — builds the disk image, boots it
+  headlessly with a timeout, and checks the serial log for the boot-success
+  message (and the absence of a panic/disk-error). See `scripts/ci-test.sh`.
+
+### CI and automated merging
+
+`.github/workflows/ci.yml` runs `cargo clippy` + `make test` on every PR and
+push to `main`, then auto-merges (squash) any PR from a `cursor/*` branch
+that passes. This is what lets the OS build itself out via a scheduled/
+triggered Cursor Automation picking tasks off `ROADMAP.md` — see
+`.cursor/skills/roadmap-automation/SKILL.md` for the full procedure an
+agent (automated or not) should follow.
 
 ### Running / testing gotchas
 

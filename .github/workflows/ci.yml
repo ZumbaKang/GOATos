@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install nightly Rust toolchain
+        run: |
+          rustup toolchain install nightly --component rust-src --component llvm-tools-preview --component clippy
+          rustup default nightly
+
+      - name: Install build dependencies (nasm, binutils, qemu)
+        run: sudo apt-get update && sudo apt-get install -y nasm binutils qemu-system-x86
+
+      - name: cargo clippy
+        working-directory: kernel
+        run: cargo clippy -- -D warnings
+
+      - name: Build + boot test
+        run: make test
+
+  # Merges the PR automatically once `test` passes, but only for branches
+  # following this project's `cursor/*` convention (i.e. opened by an
+  # automation/agent following .cursor/skills/roadmap-automation) - human
+  # PRs on other branch names are left for manual review/merge.
+  auto-merge:
+    needs: test
+    if: >
+      github.event_name == 'pull_request' &&
+      startsWith(github.head_ref, 'cursor/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Merge pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Automations may open PRs as drafts; merging requires "ready for review".
+          gh pr ready "$PR_NUMBER" --repo "$REPO" || true
+          gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch
