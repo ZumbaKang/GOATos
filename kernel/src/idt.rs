@@ -174,8 +174,8 @@ impl Loaded {
 /// Builds an empty IDT and loads it, replacing whatever interrupt table state
 /// the CPU was left in by the BIOS and `boot/boot.asm`.
 ///
-/// Registering handlers before this runs would be pointless: it resets every
-/// vector, precisely so it can't inherit garbage (see below).
+/// Must run before any handler is registered: it resets every vector, so an
+/// earlier registration would be discarded.
 pub fn init() {
     // SAFETY: single-threaded, interrupts masked, and no handler can be
     // running yet - nothing else can observe the table mid-reset.
