@@ -50,6 +50,24 @@ Then convert the PPM to something viewable: `convert /tmp/scr.ppm
 driver changes (colors, layout, scrolling) actually look right, not just
 that the code compiles and "should" work.
 
+## Where QEMU's CPU emulation is *not* faithful
+
+Worth knowing before designing a mechanism around a CPU feature and finding out
+it can't be tested:
+
+- **Segment limits are not enforced** by QEMU's TCG emulation. Verified
+  directly: a write through a deliberately bounded expand-down data segment,
+  well outside its limit, silently succeeded instead of raising #GP. So
+  segmentation cannot be used to bound the kernel stack (a guard page, once
+  paging exists, is the only option - see `ROADMAP.md` 2.6).
+- v86 has its own, different gaps - notably no double-fault escalation. See
+  `web-demo-packaging` for the list, and check the browser console before
+  blaming the kernel.
+
+Both directions of this matter: a mechanism that "works" under QEMU may be
+unverifiable in v86, and vice versa, so a feature that has to hold on real
+hardware is best proved under both.
+
 ## Defensive driver design (important pattern, learned the hard way)
 
 Early on, the serial driver's `.expect()`-on-failure pattern caused a

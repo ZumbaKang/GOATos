@@ -159,6 +159,12 @@ static DOUBLE_FAULT_TSS: TssCell = TssCell(UnsafeCell::new(TaskStateSegment::EMP
 /// 4 KiB is plenty: the handler formats one report and halts. It is separate
 /// from the kernel stack in `entry.s` on purpose - the whole point is to
 /// survive a fault whose cause is the interrupted stack itself.
+///
+/// Both stacks are `.bss` objects, though, and the linker is free to place
+/// this one immediately below the kernel stack - so a *runaway* overflow can
+/// still reach it, since nothing stops one yet. Roadmap task 2.6 (a guard page,
+/// once paging exists) is what fixes that, by faulting before the overflow gets
+/// this far.
 const DOUBLE_FAULT_STACK_SIZE: usize = 4096;
 
 /// 16-byte aligned so the handler's initial `esp` matches what the compiler

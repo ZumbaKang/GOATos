@@ -63,13 +63,25 @@ readable diagnostic, which makes every phase after it much faster to debug.
       *Done when:* deliberately triggering each exception (e.g. an integer
       divide by zero behind a debug flag) shows the expected message
       instead of a silent freeze, in both QEMU and v86.
-- [ ] **1.4 - Double-fault handler with its own stack.** Set up a TSS with
+- [x] **1.4 - Double-fault handler with its own stack.** Set up a TSS with
       a dedicated stack for the double-fault handler (vector 8). Without
       this, a fault *while handling a fault* (e.g. a stack overflow)
       triple-faults the CPU and silently reboots the VM instead of printing
       anything.
       *Done when:* a deliberately-triggered stack overflow prints a
       double-fault message instead of rebooting.
+      *Done as:* vector 8 goes through a task gate, so the CPU loads a whole
+      register set - `esp` included - from a TSS of its own
+      (`kernel/src/tss.rs`); 32-bit x86 has no equivalent of x86-64's IST,
+      and a fault taken in ring 0 otherwise keeps using the stack it
+      interrupted. Verified against a *real* double fault
+      (`KERNEL_FEATURES=trigger-double-fault`, which unregisters the
+      divide-error handler and then divides by zero, so the CPU faults while
+      delivering a fault) - not against a stack overflow: without paging
+      there is no guard page below the kernel stack, and segment limits, the
+      only other way to bound a stack, are not enforced by QEMU's or v86's
+      CPU emulation, so an overflow silently corrupts memory instead of
+      faulting. Closing that gap is task 2.6 below.
 - [ ] **1.5 - Remap the PIC.** Reprogram the 8259 PIC so hardware IRQs land
       on vectors 32+ instead of colliding with the CPU exception vectors
       (0-31) - a classic, well-documented gotcha.
@@ -120,6 +132,20 @@ want `Vec`/`Box`/`String`).
       can't silently overlap as both grow.
       *Done when:* the layout (stack range, heap range) is written down
       somewhere in code (not just in your head), and boot still succeeds.
+- [ ] **2.6 - Guard page below the kernel stack.** Now that paging exists,
+      leave the page below the kernel stack unmapped so an overflow faults
+      immediately instead of silently scribbling over whatever `.bss`
+      happens to sit underneath. This is what finishes task 1.4: the
+      double-fault handler already has a stack of its own, but a stack
+      overflow can't currently be *detected*, so it was verified against a
+      different double fault. Place the guard page so it also separates the
+      kernel stack from the double-fault handler's private stack (see
+      `kernel/src/tss.rs`), which the linker is free to lay out directly
+      below it.
+      *Done when:* a deliberately-triggered stack overflow (infinite
+      recursion behind a `trigger-stack-overflow` feature) prints the
+      double-fault report from 1.4 instead of corrupting memory or
+      rebooting.
 
 ---
 
