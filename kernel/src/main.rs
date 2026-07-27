@@ -336,9 +336,9 @@ fn idle_with_input() -> ! {
         let second = pit::seconds();
         if second > last_second {
             last_second = second;
-            // Serial is what CI greps; VGA gets the same line so a screendump
-            // (or the web demo) shows the counter moving too.
-            diag_println!("PIT: tick {} ({} s)", pit::ticks(), second);
+            // Serial only: CI greps this line, and printing it on VGA would
+            // land mid-echo whenever a second boundary falls between keystrokes.
+            serial_println!("PIT: tick {} ({} s)", pit::ticks(), second);
         }
         unsafe { asm!("hlt") };
     }
