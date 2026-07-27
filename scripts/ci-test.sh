@@ -410,7 +410,7 @@ if ! grep -qE "ATA: PIO primary master ready" "$LOG_FILE"; then
   echo "FAIL: kernel did not report the ATA primary master"
   status=1
 fi
-if ! grep -qE "FS: GOATFS at LBA [0-9]+ \([0-9]+ files?, mounted\)" "$LOG_FILE"; then
+if ! grep -qE "FS: GOATFS at LBA [0-9]+ \([0-9]+ files?\), mounted" "$LOG_FILE"; then
   echo "FAIL: kernel did not mount GOATFS"
   status=1
 fi

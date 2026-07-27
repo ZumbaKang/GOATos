@@ -5,8 +5,9 @@
 //!
 //! 1. installs an IRQ1 handler that reads that byte,
 //! 2. tracks Shift so letters can come out upper- or lower-case,
-//! 3. translates a basic US layout (letters, digits, space, enter, backspace)
-//!    to a [`crate::input::KeyEvent`] and pushes it onto the input queue,
+//! 3. translates a basic US layout (letters, digits, space, enter, backspace,
+//!    and a few filename punctuation marks: `.` `-` `_`) to a
+//!    [`crate::input::KeyEvent`] and pushes it onto the input queue,
 //! 4. unmasks IRQ1 so the interrupts actually arrive.
 //!
 //! Echoing / acting on keys is the consumer's job (see roadmap 3.3) - the
