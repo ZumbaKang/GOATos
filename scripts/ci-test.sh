@@ -36,6 +36,14 @@ if ! grep -q "GOATos booted successfully" "$LOG_FILE"; then
   status=1
 fi
 
+# Graphics mode (roadmap 5.1): bootloader set VGA mode 13h in real mode;
+# the kernel's solid-color fill is the on-screen proof (screenshot/v86),
+# and this banner is the headless stand-in CI can grep.
+if ! grep -qE "Framebuffer: VGA mode 0x13 320x200x256 at 0xa0000, solid fill 0x01" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report the Mode 13h framebuffer solid fill"
+  status=1
+fi
+
 if ! grep -q "GDT: kernel-owned" "$LOG_FILE"; then
   echo "FAIL: kernel did not report loading its own GDT"
   status=1

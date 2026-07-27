@@ -7,8 +7,9 @@
 ;   1. ask the BIOS for the system memory map, while it can still answer
 ;   2. load the kernel (following sectors on the same disk) into memory
 ;   3. enable the A20 line, so we can address memory past 1MiB
-;   4. set up a flat GDT and switch the CPU into 32-bit protected mode
-;   5. jump into the kernel's entry point
+;   4. switch the VGA BIOS into mode 13h (graphics; real-mode only)
+;   5. set up a flat GDT and switch the CPU into 32-bit protected mode
+;   6. jump into the kernel's entry point
 ;
 ; KERNEL_SECTORS is supplied at assemble time (`nasm -D KERNEL_SECTORS=N`)
 ; by the Makefile, computed from the kernel binary's actual size, so this
@@ -48,6 +49,15 @@ start:
     call get_disk_geometry
     call load_kernel
     call enable_a20
+
+    ; VGA mode 13h (320x200, 256-color linear framebuffer at 0xA0000).
+    ; BIOS video services are real-mode only - once we flip CR0.PE the
+    ; kernel has no way to call INT 10h, so the mode switch has to happen
+    ; here. Mode 13h is the most universally-emulated graphics mode
+    ; (QEMU and v86 both render it), which is what roadmap 5.1 needs.
+    mov ax, 0x0013                 ; AH=00h set mode, AL=13h
+    int 0x10
+
     lgdt [gdt_descriptor]
 
     mov eax, cr0

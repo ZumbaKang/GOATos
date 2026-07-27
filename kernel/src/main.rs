@@ -6,10 +6,9 @@
 //! to 32-bit protected mode, and jumps straight to `_start32` (`entry.s`),
 //! which sets up a stack and calls into `kernel_main` below.
 //!
-//! This first step is intentionally minimal: it prints proof of boot to
-//! both the VGA text screen (so it's *displayable*, on real hardware and in
-//! a browser via v86) and the serial port (so headless QEMU/CI can verify
-//! it booted), then halts.
+//! Boot proof goes to the Mode 13h framebuffer (solid-color fill so a
+//! screendump/v86 canvas shows graphics mode is live) and the serial port
+//! (so headless QEMU/CI can verify the rest of the bring-up).
 #![no_std]
 #![no_main]
 // Interrupt/exception handlers are raw CPU entry points: they need the
@@ -29,6 +28,7 @@ use core::panic::PanicInfo;
 
 pub mod ata;
 pub mod exceptions;
+pub mod framebuffer;
 pub mod fs;
 pub mod gdt;
 pub mod idt;
@@ -49,22 +49,36 @@ global_asm!(include_str!("entry.s"), options(att_syntax));
 
 #[no_mangle]
 pub extern "C" fn kernel_main() -> ! {
-    // VGA is the primary, load-bearing output surface (it's what makes
-    // GOATos "displayable" both on real hardware and via v86 in a browser),
-    // so it comes first and never depends on the serial port succeeding.
-    vga::clear_screen();
-    vga_println!("GOATos");
-    vga_println!("------");
-    vga_println!("Booted successfully via a from-scratch bootloader.");
-    vga_println!("This screen is the same VGA text buffer real BIOS");
-    vga_println!("hardware (and browser emulators like v86) render -");
-    vga_println!("what you see here is what a web visitor would see.");
+    // Graphics mode is the primary, load-bearing display surface now: the
+    // bootloader already switched the BIOS into VGA mode 13h, and a solid
+    // known-color fill is the roadmap 5.1 proof that mode-setting stuck
+    // (visible in a QEMU screendump and in the v86 canvas). Comes first and
+    // never depends on the serial port succeeding.
+    framebuffer::fill(framebuffer::SOLID_COLOR);
 
     // Serial output is best-effort: useful for headless QEMU/CI, but its
     // absence must never affect anything above. It comes up before the
     // subsystems below so that a fault in any of them still has a headless
     // surface to report itself on (see `exceptions`).
     serial::init();
+    serial_println!(
+        "Framebuffer: VGA mode {:#04x} {}x{}x256 at {:#x}, solid fill {:#04x}",
+        framebuffer::MODE,
+        framebuffer::WIDTH,
+        framebuffer::HEIGHT,
+        framebuffer::BUFFER_ADDR,
+        framebuffer::SOLID_COLOR
+    );
+
+    // Text-mode VGA writes still land at 0xB8000 for the bring-up banners
+    // below, but that buffer is no longer what the monitor shows - serial
+    // (and the solid framebuffer fill above) carry proof of boot until a
+    // bitmap font lands in roadmap 5.3.
+    vga::clear_screen();
+    vga_println!("GOATos");
+    vga_println!("------");
+    vga_println!("Booted successfully via a from-scratch bootloader.");
+    vga_println!("Display: VGA mode 13h (graphics), text buffer unused.");
 
     // Take over segmentation from the bootloader's throwaway GDT. Printing
     // first means a botched GDT load shows up as "the banner is on screen but

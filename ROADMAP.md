@@ -388,11 +388,18 @@ Explicitly the last phase in this list - don't start it before Phases 1-2
 are done, since mouse input (via interrupts) and any nontrivial rendering
 work both lean on them.
 
-- [ ] **5.1 - Switch to a graphics mode.** Have `boot.asm` set a VGA (or
+- [x] **5.1 - Switch to a graphics mode.** Have `boot.asm` set a VGA (or
       VBE) graphics mode via a real-mode BIOS call before the protected-mode
       switch (the kernel itself has no BIOS access after that point).
       *Done when:* the screen is a solid, known color instead of the text
       console - proving mode-setting worked, in both QEMU and v86.
+      *Done as:* `boot/boot.asm` calls `INT 10h / AX=0013h` (VGA mode 13h,
+      320x200x256 at `0xA0000`) after A20 and before the protected-mode
+      switch. `kernel/src/framebuffer.rs` fills that buffer with palette
+      index `0x01` (default DAC dark blue). Serial banner
+      `Framebuffer: VGA mode 0x13 320x200x256 at 0xa0000, solid fill 0x01`
+      is grepped by CI; QEMU screendump + v86 canvas confirm the solid
+      blue screen (text-mode 0xB8000 is no longer displayed).
 - [ ] **5.2 - Pixel primitives.** A new `kernel/src/framebuffer.rs` with
       `set_pixel`, `fill_rect`, and `draw_line` over the graphics-mode
       buffer.
