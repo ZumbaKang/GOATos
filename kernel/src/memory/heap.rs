@@ -32,7 +32,7 @@ use super::frame::{self, FRAME_SIZE};
 /// RAM still has most of its pool left for page tables and everything else.
 pub const HEAP_SIZE: usize = 1024 * 1024;
 
-const _: () = assert!(HEAP_SIZE % FRAME_SIZE as usize == 0);
+const _: () = assert!(HEAP_SIZE.is_multiple_of(FRAME_SIZE as usize));
 const HEAP_FRAMES: usize = HEAP_SIZE / FRAME_SIZE as usize;
 
 /// Every heap block - free or live - is aligned to this. Large enough for any
@@ -46,7 +46,7 @@ const ALIGN: usize = 8;
 /// neighbour on split/coalesce.
 const HEADER_SIZE: usize = core::mem::size_of::<FreeBlock>();
 const _: () = assert!(HEADER_SIZE == 8);
-const _: () = assert!(HEADER_SIZE % ALIGN == 0);
+const _: () = assert!(HEADER_SIZE.is_multiple_of(ALIGN));
 
 /// Intrusive free-list node, stored at the start of every free block.
 ///
@@ -98,8 +98,8 @@ impl Heap {
     /// mapped RAM that nothing else will touch for the life of the heap.
     unsafe fn init(&mut self, start: usize, size: usize) {
         debug_assert!(size >= HEADER_SIZE);
-        debug_assert!(start % ALIGN == 0);
-        debug_assert!(size % ALIGN == 0);
+        debug_assert!(start.is_multiple_of(ALIGN));
+        debug_assert!(size.is_multiple_of(ALIGN));
 
         let block = start as *mut FreeBlock;
         // SAFETY: caller guarantees the region is ours and large enough for
