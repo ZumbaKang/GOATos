@@ -159,6 +159,26 @@ pub fn clear_screen() {
     });
 }
 
+/// Erases the character left of the cursor and moves the cursor back one
+/// column. No-op at column 0 (does not wrap onto the previous row) - enough
+/// for the keyboard driver's basic echo; a real line editor can do better.
+pub fn backspace() {
+    WRITER.with(|writer| {
+        if writer.column == 0 {
+            return;
+        }
+        writer.column -= 1;
+        writer.put_char(
+            writer.row,
+            writer.column,
+            ScreenChar {
+                ascii_character: b' ',
+                color_code: writer.color_code,
+            },
+        );
+    });
+}
+
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     use core::fmt::Write;

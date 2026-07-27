@@ -385,8 +385,20 @@ else
   done
 fi
 
+# PS/2 keyboard (IRQ1): handler installed, line unmasked. Master IMR should
+# now have IRQ0 and IRQ1 clear (0xfc) with the slave still fully masked.
+if ! grep -q "Keyboard: PS/2 on IRQ1 -> vector 33" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report installing the PS/2 keyboard driver"
+  status=1
+fi
+
+if ! grep -qE "Keyboard: PS/2 on IRQ1 -> vector 33, IMR 0xfc/0xff" "$LOG_FILE"; then
+  echo "FAIL: keyboard banner missing IRQ1 vector/IMR (keyboard IRQ not actually unmasked)"
+  status=1
+fi
+
 # A stray interrupt on a vector nothing owns, once interrupts are on.
-# (IRQ0 has a real handler now, so timer ticks must not land here.)
+# (IRQ0/IRQ1 have real handlers now, so timer/keyboard must not land here.)
 if grep -q "UNHANDLED INTERRUPT" "$LOG_FILE"; then
   echo "FAIL: kernel took an interrupt it had no handler for"
   status=1

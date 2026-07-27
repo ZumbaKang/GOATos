@@ -268,13 +268,20 @@ Needs Phase 1 (interrupts) done first.
       and prints `PIT: tick N (S s)` once a second over VGA + serial;
       `scripts/ci-test.sh` checks the banner and that at least two successive
       reports show a strictly increasing counter.
-- [ ] **3.2 - PS/2 keyboard driver.** Add an IRQ1 handler that reads
+- [x] **3.2 - PS/2 keyboard driver.** Add an IRQ1 handler that reads
       scancodes from the keyboard controller and translates a basic US
       layout (letters, digits, space, enter, backspace) to ASCII.
       *Done when:* typing on the keyboard echoes the corresponding
       characters onto the VGA screen. Test in v86 too - it forwards real
       browser keyboard events into the emulated PS/2 controller, so this
       is a good one to verify "for real" in the web demo, not just QEMU.
+      *Done as:* `kernel/src/keyboard.rs` installs an IRQ1 handler that
+      reads scancode set 1 from the 8042 data port, tracks Shift, translates
+      letters/digits/space/enter/backspace, and echoes to VGA + serial
+      (backspace via `vga::backspace`). `pic::unmask(1)` leaves IMR at
+      `0xfc/0xff`. Verified with QEMU monitor `sendkey` (typed text appears
+      on the VGA screendump and in the serial log) and against the v86 web
+      demo.
 - [ ] **3.3 - Input event queue.** A small fixed-size ring buffer (no heap
       needed, or backed by the new allocator if Phase 2 is done) that
       decouples "a key was pressed" (interrupt context) from "something
