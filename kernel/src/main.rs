@@ -27,7 +27,9 @@ use core::alloc::Layout;
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 
+pub mod ata;
 pub mod exceptions;
+pub mod fs;
 pub mod gdt;
 pub mod idt;
 pub mod input;
@@ -314,11 +316,39 @@ pub extern "C" fn kernel_main() -> ! {
         input::CAPACITY
     );
 
+    // Disk + tiny on-disk filesystem (roadmap 4.5): ATA PIO reads of the
+    // GOATFS image planted at a fixed LBA past the kernel. Mount + self-test
+    // happen before the shell prompt so `cat hello.txt` is ready immediately.
+    ata::init();
+    let ata_state = if ata::is_present() {
+        "primary master ready"
+    } else {
+        "primary master missing"
+    };
+    diag_println!("ATA: PIO {}", ata_state);
+    let fs_banner = fs::init();
+    diag_println!("{}", fs_banner);
+    let fs_test = fs::self_test();
+    diag_println!("{}", fs_test);
+    // Echo the known file the same way `cat hello.txt` will, so CI can grep
+    // the exact on-disk contents without driving the keyboard.
+    if fs_test.ok {
+        let mut buf = [0u8; fs::MAX_FILE_SIZE];
+        if let Ok(n) = fs::read_file(fs::HELLO_TXT_NAME, &mut buf) {
+            if let Ok(text) = core::str::from_utf8(&buf[..n]) {
+                diag_println!("FS: cat {} =>", fs::HELLO_TXT_NAME);
+                // File includes its own trailing newline.
+                vga_print!("{}", text);
+                serial_print!("{}", text);
+            }
+        }
+    }
+
     // Shell on top of that queue: line editor + built-in commands (roadmap
-    // 4.1 / 4.2). Banner first so the prompt is the last thing on screen,
+    // 4.1 / 4.2 / 4.5). Banner first so the prompt is the last thing on screen,
     // ready for typing.
     diag_println!(
-        "Shell: line editor ({} chars) + builtins (help/clear/echo/about)",
+        "Shell: line editor ({} chars) + builtins (help/clear/echo/about/cat)",
         shell::LINE_CAPACITY
     );
 

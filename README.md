@@ -25,8 +25,10 @@ and a "hello world" on screen.
 - [x] Keyboard input (PIT timer + PS/2 keyboard on IRQ0/IRQ1, input event
       queue decoupling the IRQ handler from consumers)
 - [x] **A minimal shell**: line editor on the keyboard queue, built-ins
-      (`help`/`clear`/`echo`/`about`), and a cooperative round-robin
-      scheduler (FIFO ready queue, explicit yield) with 3+ fair tasks.
+      (`help`/`clear`/`echo`/`about`/`cat`), a cooperative round-robin
+      scheduler (FIFO ready queue, explicit yield) with 3+ fair tasks, and
+      a tiny on-disk filesystem (ATA PIO + GOATFS) so `cat` reads real files
+      from the disk image.
 - [ ] Graphics mode + a basic GUI
 - [ ] ...and much more, one step at a time.
 

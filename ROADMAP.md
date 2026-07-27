@@ -360,12 +360,21 @@ rather than blocking this one.
       `Scheduler: turns [0]=N [1]=M [2]=P` and the demos print their own
       counters. `scripts/ci-test.sh` checks the banner, that both demos
       advance, and that the last turn triple has spread ≤ 1.
-- [ ] **4.5 - (optional, needs filesystem) Load & run from disk.** Once a
+- [x] **4.5 - (optional, needs filesystem) Load & run from disk.** Once a
       basic filesystem exists (see its own skill), extend the shell with a
       command that reads a file's contents (e.g. `cat <file>`) - the first
       real use of on-disk storage beyond booting.
       *Done when:* `cat`-ing a known test file placed on the disk image
       prints its exact contents.
+      *Done as:* `kernel/src/ata.rs` is a polling PIO driver for the primary
+      ATA master (28-bit LBA reads, bounded spins, soft-fail if missing).
+      `kernel/src/fs.rs` mounts a tiny custom "GOATFS" image at fixed LBA
+      2048 (past the boot sector + kernel); `scripts/build-goatfs.py` packs
+      it and the Makefile `dd`s it into `build/disk.img`. Boot mounts the
+      FS, self-tests by reading `hello.txt`, and echoes
+      `GOATos says hello from disk!`; the shell gains a `cat <file>` built-in
+      that does the same. `scripts/ci-test.sh` greps the ATA/FS banners, the
+      self-test verdict, and the exact file contents.
 
 ---
 
