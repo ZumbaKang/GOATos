@@ -404,6 +404,12 @@ if ! grep -qE "Input: [0-9]+-event ring buffer \(IRQ pushes, idle loop drains\)"
   status=1
 fi
 
+# Line editor (roadmap 4.1): prompt-ready after boot, fixed capacity reported.
+if ! grep -qE "Shell: line editor \([0-9]+ chars, type/backspace/enter to echo\)" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report the shell line editor"
+  status=1
+fi
+
 # A stray interrupt on a vector nothing owns, once interrupts are on.
 # (IRQ0/IRQ1 have real handlers now, so timer/keyboard must not land here.)
 if grep -q "UNHANDLED INTERRUPT" "$LOG_FILE"; then
