@@ -1,18 +1,19 @@
 ---
 name: memory-management
-description: Guidance for implementing physical/virtual memory management in GOATos (paging, a physical frame allocator, a kernel heap) - not yet built. Use this when starting work on memory management, paging, or adding alloc/Vec/Box support to the kernel.
+description: Guidance for implementing physical/virtual memory management in GOATos (paging and a kernel heap are not built yet; a BIOS memory map and a physical frame allocator are). Use this when starting work on memory management, paging, or adding alloc/Vec/Box support to the kernel.
 ---
 
-# Memory management (barely started)
+# Memory management (started, no paging yet)
 
 GOATos currently runs entirely without paging: the bootloader (see
 `bootloader-and-linking`) leaves the CPU with a flat, unpaged 32-bit
-protected-mode address space, and the kernel only ever touches a handful of
-fixed, hand-picked addresses (the load address `0x10000`, the VGA buffer
-`0xb8000`, the 64KiB stack in `.bss`). There is no heap, no `alloc` crate,
-no `Vec`/`Box`/`String` - only `core`.
+protected-mode address space, so every address the kernel handles is a
+physical one. There is no heap, no `alloc` crate, no `Vec`/`Box`/`String` -
+only `core`.
 
-The one piece that does exist is the **memory map** (step 1 below).
+What does exist is the **memory map** and a **physical frame allocator** on
+top of it (steps 1 and 2 below). Paging is the next step, and the first one
+that changes what an address *means*.
 
 ## Suggested order of implementation
 
@@ -40,9 +41,33 @@ The one piece that does exist is the **memory map** (step 1 below).
      tracks the emulator's configured RAM: 127 MiB under QEMU's 128MiB
      default, 31 MiB under the web demo's 32MiB v86. `scripts/ci-test.sh`
      asserts the QEMU figure.
-2. **A physical frame allocator.** Simplest reasonable starting point: a
-   bump/free-list allocator over the usable regions from the memory map,
-   operating in 4KiB frames.
+2. **A physical frame allocator.** *Done* - `kernel/src/memory/frame.rs` is a
+   bump cursor over the usable regions with an intrusive free list in front of
+   it, in 4KiB frames. What to know before building on it:
+   - `frame::allocate()` hands out a `Frame`, `frame::free()` takes one back
+     and *reports* a double free rather than accepting it, and
+     `frame::report()` is the summary the boot banner prints. Frames come back
+     un-zeroed; page tables will have to zero their own.
+   - The free list lives **inside the free frames** (first four bytes = index
+     of the next free frame). So a frame handed out has whatever the last
+     owner (or the allocator) left in it, and nothing may write to a frame it
+     has freed.
+   - Usable-per-E820 is not the same as free. The allocator subtracts a fixed
+     list of reservations: the IVT/BDA plus the E820 handoff block
+     (0x0-0x1000), the boot sector's page (0x7000), the kernel image
+     (`__kernel_start`/`__kernel_end`, two symbols `linker.ld` exports - they
+     span `.bss`, so the 64KiB kernel stack and the double-fault stack are
+     both inside), and 0xa0000-0x100000. **Anything new that claims a fixed
+     physical address must be added there**, or the allocator will hand it to
+     someone else.
+   - Addresses above the 4GiB line are dropped, since this CPU cannot reach
+     them. Frames are named by index, not address, so the top frame is still
+     representable.
+   - The pool size tracks the emulator, like the map it comes from: 32576
+     frames (127 MiB) under QEMU's 128MiB default, 8032 (31 MiB) under the web
+     demo's 32MiB v86. `scripts/ci-test.sh` asserts the QEMU figure, and
+     independently re-checks the frame addresses the boot self-test prints
+     against the reserved ranges it prints.
 3. **Paging.** Set up a page directory + page tables (32-bit, non-PAE, so
    two-level paging: page directory -> page table -> 4KiB page) and enable
    it via `CR3`/`CR0.PG`. Consider identity-mapping low memory first (the

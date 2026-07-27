@@ -134,6 +134,79 @@ else
   fi
 fi
 
+# The frame allocator built on top of that map. Its own self-test is the
+# kernel's word for it; the checks after it are this script's, made against
+# the addresses in the log rather than against the verdict.
+if ! grep -q "Frames: self-test ok" "$LOG_FILE"; then
+  echo "FAIL: the frame allocator's boot self-test did not pass"
+  status=1
+fi
+
+if grep -q "SELF-TEST FAILED" "$LOG_FILE"; then
+  echo "FAIL: the frame allocator's boot self-test reported a failure"
+  status=1
+fi
+
+if grep -q "NO ALLOCATABLE MEMORY" "$LOG_FILE"; then
+  echo "FAIL: no usable memory survived the frame allocator's reserved ranges"
+  status=1
+fi
+
+# The kernel must exclude its own image, and it must work that out from the
+# linker rather than from a guess: an under-sized reservation would leave the
+# allocator handing out frames the kernel is running in.
+if ! grep -qE "^Frames: reserved 0x00010000-0x[0-9a-f]+ +[0-9]+ frames  kernel image" "$LOG_FILE"; then
+  echo "FAIL: the frame allocator did not reserve the kernel image"
+  status=1
+fi
+
+frame_summary="$(grep -m1 '^Frames: [0-9]' "$LOG_FILE")"
+frame_mib="$(sed -n 's/^Frames: [0-9]\+ x 4 KiB allocatable (\([0-9]\+\) MiB).*/\1/p' <<<"$frame_summary")"
+# The pool is the usable memory checked above, less the few hundred KiB of
+# reservations, so it lands in the same window. Far below it would mean whole
+# regions are being dropped; above it, that the reservations are not applied.
+if [ -z "$frame_mib" ] || [ "$frame_mib" -lt 100 ] || [ "$frame_mib" -gt 128 ]; then
+  echo "FAIL: frame pool (${frame_mib:-none} MiB) does not match the usable memory reported"
+  status=1
+fi
+
+mapfile -t reserved_ranges < <(sed -n 's/^Frames: reserved 0x\([0-9a-f]\+\)-0x\([0-9a-f]\+\).*/\1 \2/p' "$LOG_FILE")
+mapfile -t allocated_frames < <(sed -n 's/^Frame: *#[0-9]\+ at 0x\([0-9a-f]\+\)$/\1/p' "$LOG_FILE")
+
+if [ "${#reserved_ranges[@]}" -lt 3 ]; then
+  echo "FAIL: kernel reported ${#reserved_ranges[@]} reserved ranges, expected at least 3"
+  status=1
+fi
+
+if [ "${#allocated_frames[@]}" -lt 4 ]; then
+  echo "FAIL: kernel printed ${#allocated_frames[@]} allocated frame addresses, expected at least 4"
+  status=1
+fi
+
+# Same-sized frames at distinct addresses cannot overlap, so distinctness is
+# the whole of "no overlaps" here.
+distinct="$(printf '%s\n' "${allocated_frames[@]}" | sort -u | wc -l)"
+if [ "$distinct" -ne "${#allocated_frames[@]}" ]; then
+  echo "FAIL: allocator handed out the same frame twice"
+  status=1
+fi
+
+for frame_hex in "${allocated_frames[@]}"; do
+  frame_addr="$((16#$frame_hex))"
+  if [ "$((frame_addr % 4096))" -ne 0 ]; then
+    echo "FAIL: allocated frame 0x$frame_hex is not 4KiB-aligned"
+    status=1
+  fi
+  for range in "${reserved_ranges[@]}"; do
+    # shellcheck disable=SC2086 # deliberate word splitting: "start end"
+    set -- $range
+    if [ "$frame_addr" -ge "$((16#$1))" ] && [ "$frame_addr" -lt "$((16#$2))" ]; then
+      echo "FAIL: allocated frame 0x$frame_hex is inside reserved range 0x$1-0x$2"
+      status=1
+    fi
+  done
+done
+
 # A stray interrupt on a vector nothing owns, once interrupts are on.
 if grep -q "UNHANDLED INTERRUPT" "$LOG_FILE"; then
   echo "FAIL: kernel took an interrupt it had no handler for"

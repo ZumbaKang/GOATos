@@ -128,11 +128,23 @@ pub extern "C" fn kernel_main() -> ! {
     );
 
     // What the bootloader asked the BIOS before protected mode put it out of
-    // reach. Nothing consumes this yet - it is the input a frame allocator and
-    // paging both start from - so for now the kernel just reports it, which is
-    // also how it gets checked against the RAM the machine was given.
+    // reach: the machine's physical memory layout, which is where every
+    // allocation this kernel will ever make ultimately comes from.
     let memory = memory::map::load();
     vga_println!("{}", memory);
+
+    // Divide the usable part of that map into 4 KiB frames, minus the ranges
+    // this kernel has already put something in, and prove on every boot that
+    // the result hands out distinct, real frames and takes them back.
+    let frames = memory::frame::init(&memory);
+    vga_println!("{}", frames);
+    let frame_test = memory::frame::self_test();
+    vga_print!("Frames:");
+    for frame in frame_test.frames() {
+        vga_print!(" {:08x}", frame.start_address());
+    }
+    vga_println!("");
+    vga_println!("{}", frame_test);
 
     serial_println!(
         "GDT: kernel-owned at {:#010x} (limit {:#x}), cs={:#04x} ds={:#04x} tr={:#04x}",
@@ -182,6 +194,24 @@ pub extern "C" fn kernel_main() -> ! {
         );
     }
     serial_println!("{}", memory);
+
+    for reservation in frames.reservations() {
+        serial_println!("Frames: reserved {}", reservation);
+    }
+    serial_println!("{}", frames);
+    // The addresses themselves, one per line, so the boot log carries the
+    // evidence for the summary rather than just the summary: eight distinct
+    // frames, none of them inside any of the reserved ranges above.
+    for (position, frame) in frame_test.frames().iter().enumerate() {
+        serial_println!("Frame:  #{} at {}", position + 1, frame);
+    }
+    for frame in frame_test.freed() {
+        serial_println!("Frame:  freed {}", frame);
+    }
+    if let Some(frame) = frame_test.reused() {
+        serial_println!("Frame:  reused {} for the next allocation", frame);
+    }
+    serial_println!("{}", frame_test);
 
     // The last piece of setup, and the first moment the kernel can be
     // interrupted at all. The masks are re-read afterwards because they are

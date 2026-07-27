@@ -145,10 +145,27 @@ want `Vec`/`Box`/`String`).
       machine with no RAM. The numbers track the emulator they run on - 127
       MiB usable under QEMU's 128MiB default, 31 MiB under the web demo's
       32MiB v86 - which is the real proof they come from the BIOS.
-- [ ] **2.2 - Physical frame allocator.** A simple bump or free-list
+- [x] **2.2 - Physical frame allocator.** A simple bump or free-list
       allocator over the usable regions from 2.1, operating in 4KiB frames.
       *Done when:* the kernel can allocate and free a handful of frames and
       print their addresses, with no overlaps.
+      *Done as:* `kernel/src/memory/frame.rs` - both, in fact: a bump cursor
+      walks the usable regions, and frames handed back go on a free list that
+      is checked first. The list is *intrusive* (a free frame stores the next
+      free frame's index in its own first four bytes), which is how a free
+      list exists at all before there is a heap to keep one in. What the BIOS
+      calls usable is not the whole story, though: the allocator also carves
+      out an explicit list of ranges this kernel has already put something in
+      - the IVT/BIOS data area and the E820 handoff block, the boot sector,
+      the kernel image (from two new linker symbols, so it tracks the image as
+      it grows, `.bss` and both stacks included), and the legacy video/BIOS
+      window below 1 MiB. A self-test runs on every boot: eight frames out,
+      checked distinct and inside real unreserved RAM, two back, and the next
+      allocation must return the more recently freed of them, a double free
+      must be refused, and the in-use count must return to zero.
+      `scripts/ci-test.sh` re-checks the printed addresses itself rather than
+      trusting that verdict - which is what caught the frames in the reserved
+      ranges when the reservations were deliberately disabled for one boot.
 - [ ] **2.3 - Page tables + identity mapping.** Build a page directory and
       page tables (32-bit, non-PAE: directory -> table -> 4KiB page),
       identity-mapping low memory (the simplest correct starting point -
