@@ -404,8 +404,27 @@ if ! grep -qE "Input: [0-9]+-event ring buffer \(IRQ pushes, idle loop drains\)"
   status=1
 fi
 
-# Shell (roadmap 4.1 / 4.2): line editor + built-in command dispatcher.
-if ! grep -qE "Shell: line editor \([0-9]+ chars\) \+ builtins \(help/clear/echo/about\)" "$LOG_FILE"; then
+# Disk filesystem (roadmap 4.5): ATA PIO + GOATFS mount, then cat of the
+# known test file planted in build/disk.img at LBA 2048.
+if ! grep -qE "ATA: PIO primary master ready" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report the ATA primary master"
+  status=1
+fi
+if ! grep -qE "FS: GOATFS at LBA [0-9]+ \([0-9]+ files?\), mounted" "$LOG_FILE"; then
+  echo "FAIL: kernel did not mount GOATFS"
+  status=1
+fi
+if ! grep -q "FS: self-test ok (hello.txt ok)" "$LOG_FILE"; then
+  echo "FAIL: GOATFS self-test did not pass"
+  status=1
+fi
+if ! grep -q "GOATos says hello from disk!" "$LOG_FILE"; then
+  echo "FAIL: cat of hello.txt did not print the expected on-disk contents"
+  status=1
+fi
+
+# Shell (roadmap 4.1 / 4.2 / 4.5): line editor + built-in command dispatcher.
+if ! grep -qE "Shell: line editor \([0-9]+ chars\) \+ builtins \(help/clear/echo/about/cat\)" "$LOG_FILE"; then
   echo "FAIL: kernel did not report the shell line editor / builtins"
   status=1
 fi

@@ -1,10 +1,11 @@
-//! Minimal interactive shell (roadmap 4.1 + 4.2).
+//! Minimal interactive shell (roadmap 4.1 / 4.2 / 4.5).
 //!
 //! Sits on top of the Phase 3 input queue: typed characters append to a
 //! fixed-size line buffer and echo as they arrive, backspace removes the
 //! last character, and enter submits the line to a small built-in command
-//! dispatcher (`help` / `clear` / `echo` / `about`).
+//! dispatcher (`help` / `clear` / `echo` / `about` / `cat`).
 
+use crate::fs::{self, FsError};
 use crate::input::{self, KeyEvent};
 use crate::{serial_print, serial_println, vga, vga_print, vga_println};
 
@@ -127,6 +128,7 @@ fn run_line(line: &str) {
         "clear" => cmd_clear(),
         "echo" => cmd_echo(rest),
         "about" => cmd_about(),
+        "cat" => cmd_cat(rest),
         other => {
             vga_println!("unknown command: {}", other);
             serial_println!("unknown command: {}", other);
@@ -153,11 +155,13 @@ fn cmd_help() {
     vga_println!("  clear  - clear the VGA screen");
     vga_println!("  echo   - print arguments");
     vga_println!("  about  - about GOATos");
+    vga_println!("  cat    - print a file from disk");
     serial_println!("Built-in commands:");
     serial_println!("  help   - list commands");
     serial_println!("  clear  - clear the VGA screen");
     serial_println!("  echo   - print arguments");
     serial_println!("  about  - about GOATos");
+    serial_println!("  cat    - print a file from disk");
 }
 
 fn cmd_clear() {
@@ -176,4 +180,57 @@ fn cmd_about() {
     vga_println!("Booted via a hand-written MBR bootloader.");
     serial_println!("GOATos - a from-scratch 32-bit x86 OS in Rust");
     serial_println!("Booted via a hand-written MBR bootloader.");
+}
+
+/// Reads `path` from the mounted GOATFS image and prints its bytes.
+fn cmd_cat(args: &str) {
+    let path = args.trim();
+    if path.is_empty() {
+        vga_println!("usage: cat <file>");
+        serial_println!("usage: cat <file>");
+        return;
+    }
+    // One path argument only - no flags, no globbing.
+    if path.chars().any(char::is_whitespace) {
+        vga_println!("usage: cat <file>");
+        serial_println!("usage: cat <file>");
+        return;
+    }
+
+    let mut buf = [0u8; fs::MAX_FILE_SIZE];
+    match fs::read_file(path, &mut buf) {
+        Ok(n) => {
+            // Files are treated as raw bytes; print what we can as text and
+            // fall back to a hex dump only if something non-UTF8 sneaks in.
+            match core::str::from_utf8(&buf[..n]) {
+                Ok(text) => {
+                    // Avoid an extra blank line when the file already ends
+                    // with a newline (hello.txt does).
+                    if text.ends_with('\n') {
+                        vga_print!("{}", text);
+                        serial_print!("{}", text);
+                    } else {
+                        vga_println!("{}", text);
+                        serial_println!("{}", text);
+                    }
+                }
+                Err(_) => {
+                    vga_println!("cat: {}: not valid UTF-8 ({} bytes)", path, n);
+                    serial_println!("cat: {}: not valid UTF-8 ({} bytes)", path, n);
+                }
+            }
+        }
+        Err(FsError::NotFound) => {
+            vga_println!("cat: {}: not found", path);
+            serial_println!("cat: {}: not found", path);
+        }
+        Err(FsError::NotMounted) => {
+            vga_println!("cat: filesystem not mounted");
+            serial_println!("cat: filesystem not mounted");
+        }
+        Err(e) => {
+            vga_println!("cat: {}: {}", path, e);
+            serial_println!("cat: {}: {}", path, e);
+        }
+    }
 }
