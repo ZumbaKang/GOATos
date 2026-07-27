@@ -16,9 +16,11 @@
 //! page tables that identity-map low memory, with `CR0.PG` set so the CPU
 //! actually uses them.
 //!
-//! Still missing above these three: a heap to make `alloc` (`Vec`, `Box`,
-//! `String`) available.
+//! [`heap`] is where smaller allocations come from: a contiguous run of
+//! frames turned into a free-list heap and installed as the crate's
+//! `#[global_allocator]`, so `alloc` (`Vec`, `Box`, `String`) works.
 
 pub mod frame;
+pub mod heap;
 pub mod map;
 pub mod paging;

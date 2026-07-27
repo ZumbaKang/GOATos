@@ -181,10 +181,19 @@ want `Vec`/`Box`/`String`).
       `CR0.PG`. The banner reports the mapped window, the table count, the
       `CR3` the CPU accepted, and `PG=1`; surviving the prints after that line
       is the proof the identity map actually covers the kernel.
-- [ ] **2.4 - Kernel heap + global allocator.** Reserve a heap region,
+- [x] **2.4 - Kernel heap + global allocator.** Reserve a heap region,
       implement (or bring in) a simple bump or free-list `#[global_allocator]`.
       *Done when:* `extern crate alloc;` compiles in, and a `Vec<u8>` (or
       similar) can be pushed into and printed without crashing.
+      *Done as:* `kernel/src/memory/heap.rs` takes a contiguous 1 MiB run from
+      the frame allocator (`allocate_contiguous`, bump-only so the frames are
+      one solid physical range), installs a first-fit free-list allocator as
+      the crate's `#[global_allocator]`, and brings `alloc` into
+      `build-std`. A boot self-test pushes 64 bytes into a `Vec<u8>`, resizes
+      it (forcing a second allocation + free), reads the pattern back, and
+      checks the used-byte count returns to where it started on drop.
+      `scripts/ci-test.sh` greps for that verdict.
+
 - [ ] **2.5 - Guard against heap/stack collisions.** Now that both a
       dynamic heap and a fixed-size kernel stack exist, add at least a
       basic sanity check or comment/const documenting their layout so they

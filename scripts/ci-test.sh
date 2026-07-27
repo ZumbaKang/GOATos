@@ -240,6 +240,28 @@ if [ -z "$paging_tables" ] || [ "$paging_tables" -ne $((paging_mib / 4)) ]; then
   status=1
 fi
 
+# Kernel heap + global allocator. The self-test is the proof `alloc::vec::Vec`
+# works; the size/range checks keep the reservation honest.
+if ! grep -q "Heap: self-test ok" "$LOG_FILE"; then
+  echo "FAIL: the heap allocator's boot self-test did not pass"
+  status=1
+fi
+
+if grep -q "Heap: SELF-TEST FAILED" "$LOG_FILE"; then
+  echo "FAIL: the heap allocator's boot self-test reported a failure"
+  status=1
+fi
+
+if grep -q "Heap: FAILED" "$LOG_FILE"; then
+  echo "FAIL: kernel could not reserve a contiguous heap region"
+  status=1
+fi
+
+if ! grep -qE "Heap: 0x[0-9a-f]+-0x[0-9a-f]+ \(1024 KiB\), free-list allocator ready" "$LOG_FILE"; then
+  echo "FAIL: heap banner missing the expected 1 MiB free-list region"
+  status=1
+fi
+
 # A stray interrupt on a vector nothing owns, once interrupts are on.
 if grep -q "UNHANDLED INTERRUPT" "$LOG_FILE"; then
   echo "FAIL: kernel took an interrupt it had no handler for"

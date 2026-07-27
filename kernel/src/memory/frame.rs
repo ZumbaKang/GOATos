@@ -416,6 +416,56 @@ impl FrameAllocator {
         None
     }
 
+    /// See [`allocate_contiguous`]: a contiguous run carved from the bump
+    /// cursor, never from the free list.
+    fn allocate_contiguous(&mut self, count: usize) -> Option<Frame> {
+        if count == 0 {
+            return None;
+        }
+        let count_u32 = count as u32;
+
+        while self.cursor_region < self.region_count {
+            let region = self.regions[self.cursor_region];
+            if self.cursor_frame >= region.end {
+                self.cursor_region += 1;
+                if self.cursor_region < self.region_count {
+                    self.cursor_frame = self.regions[self.cursor_region].start;
+                }
+                continue;
+            }
+
+            // Skip a reserved frame at the cursor so the run starts on real
+            // allocatable memory.
+            if self.is_reserved(self.cursor_frame) {
+                self.cursor_frame += 1;
+                continue;
+            }
+
+            let start = self.cursor_frame;
+            // A contiguous run cannot cross a region boundary: the next
+            // region's first frame may be megabytes away.
+            if start.saturating_add(count_u32) > region.end {
+                self.cursor_region += 1;
+                if self.cursor_region < self.region_count {
+                    self.cursor_frame = self.regions[self.cursor_region].start;
+                }
+                continue;
+            }
+
+            // Any reserved frame inside the candidate window breaks it; jump
+            // past that frame and try again.
+            if let Some(reserved) = (start..start + count_u32).find(|&i| self.is_reserved(i)) {
+                self.cursor_frame = reserved + 1;
+                continue;
+            }
+
+            self.cursor_frame = start + count_u32;
+            self.in_use += count;
+            return Some(Frame::from_index(start));
+        }
+        None
+    }
+
     fn free(&mut self, frame: Frame) -> Result<(), FreeError> {
         let index = frame.index();
         if self.region_of(index).is_none() || self.is_reserved(index) {
@@ -583,6 +633,17 @@ pub fn init(map: &MemoryMap) -> Report {
 /// and the ones that don't (a heap) would pay for nothing.
 pub fn allocate() -> Option<Frame> {
     ALLOCATOR.lock().allocate()
+}
+
+/// Takes `count` contiguous frames out of the pool. Returns the first frame
+/// of the run, or `None` if no such run is left.
+///
+/// Unlike [`allocate`], this ignores the free list and only advances the bump
+/// cursor: a heap (and anything else that needs one solid physical range)
+/// cannot glue together the scattered frames a free list hands back. Frames
+/// already on the free list stay there for single-frame callers.
+pub fn allocate_contiguous(count: usize) -> Option<Frame> {
+    ALLOCATOR.lock().allocate_contiguous(count)
 }
 
 /// Puts a frame back. Errors are the caller's bookkeeping mistakes, described

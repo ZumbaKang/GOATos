@@ -1,19 +1,23 @@
 ---
 name: memory-management
-description: Guidance for implementing physical/virtual memory management in GOATos (a BIOS memory map, physical frame allocator, and identity-mapped paging exist; a kernel heap is not built yet). Use this when starting work on memory management, paging, or adding alloc/Vec/Box support to the kernel.
+description: Guidance for implementing physical/virtual memory management in GOATos (a BIOS memory map, physical frame allocator, identity-mapped paging, and a kernel heap/`#[global_allocator]` exist). Use this when starting work on memory management, paging, or adding alloc/Vec/Box support to the kernel.
 ---
 
-# Memory management (paging on, no heap yet)
+# Memory management (paging on, heap on)
 
 GOATos boots with paging off (the bootloader - see `bootloader-and-linking` -
 leaves a flat 32-bit protected-mode address space), then
 `kernel/src/memory/paging.rs` identity-maps low memory and sets `CR0.PG`.
 After that every address is still numerically equal to its physical frame,
-but only because the page tables say so. There is no heap, no `alloc` crate,
-no `Vec`/`Box`/`String` - only `core`.
+but only because the page tables say so. A kernel heap
+(`kernel/src/memory/heap.rs`) then carves out 1 MiB of contiguous frames and
+installs a free-list `#[global_allocator]`, so `alloc` (`Vec`, `Box`,
+`String`) is available.
 
-What does exist is the **memory map**, a **physical frame allocator**, and
-**identity-mapped paging** (steps 1-3 below). A kernel heap is the next step.
+What does exist is the **memory map**, a **physical frame allocator**,
+**identity-mapped paging**, and a **kernel heap** (steps 1-4 below). Layout
+documentation (2.5) and a stack guard page (2.6) are the remaining Phase 2
+tasks.
 
 ## Suggested order of implementation
 
@@ -86,11 +90,25 @@ What does exist is the **memory map**, a **physical frame allocator**, and
    - 2.6 (guard page below the kernel stack) is the next paging-shaped task;
      it needs an unmapped page, so resist the urge to keep "map everything
      forever" as an invariant.
-4. **A kernel heap + global allocator.** Once paging exists, add a
-   `#[global_allocator]` (a simple bump or free-list heap allocator is
-   fine to start) so `alloc` (and thus `Vec`, `Box`, `String`, etc.)
-   becomes available. This unblocks almost everything after it (a real
-   scheduler, filesystem, etc. all want dynamic allocation).
+4. **A kernel heap + global allocator.** *Done* -
+   `kernel/src/memory/heap.rs` takes a contiguous 1 MiB run via
+   `frame::allocate_contiguous` (bump-only - the free list can hand back
+   scattered frames, which a heap cannot use as one region), installs a
+   first-fit free-list allocator as `#[global_allocator]`, and
+   `build-std` includes `alloc`. Things worth knowing before building on
+   it:
+   - Init runs after paging. Identity mapping already covers the frames,
+     so there is no extra virtual setup; the ordering is the dependency
+     the roadmap asked for.
+   - Blocks are 8-byte aligned; a `Layout` that asks for stricter
+     alignment gets a null return (and the `alloc_error_handler` path)
+     rather than a misaligned pointer.
+   - Adjacent free blocks coalesce on free. The boot self-test pushes,
+     resizes (second allocation + free of the old buffer), reads back,
+     and checks the used-byte count returns to baseline on drop.
+   - The heap range is whatever contiguous run the bump cursor could
+     spare that boot - not a fixed link-time address. Task 2.5 is where
+     that range gets written down next to the stack's.
 
 ## Conventions to follow
 
