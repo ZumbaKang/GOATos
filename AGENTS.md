@@ -52,6 +52,13 @@ via a scheduled/triggered Cursor Automation picking tasks off `ROADMAP.md` —
 see `.cursor/skills/roadmap-automation/SKILL.md` for the full procedure an
 agent (automated or not) should follow.
 
+Before merging, `auto-merge` also waits for and respects the `Cursor
+Bugbot` GitHub check (`scripts/wait-for-bugbot.sh`) if Bugbot is enabled for
+this repo, so a PR Bugbot has flagged never auto-merges out from under a
+finding — see `.cursor/skills/bugbot-and-code-review/SKILL.md` for how that
+gate works, how to enable Bugbot/Autofix, and what to do when a PR is
+blocked by it.
+
 ### Running / testing gotchas
 
 - **The kernel never exits.** After printing it halts in an infinite loop, so

@@ -134,6 +134,14 @@ up the next task. See
 for the exact procedure (and for how to set the Automation itself up - that
 part happens in the Cursor dashboard, not a repo file).
 
+Before merging, CI also waits for and respects the
+[`Cursor Bugbot`](https://cursor.com/docs/bugbot) check, if Bugbot is
+enabled for this repo - a PR it flags never auto-merges out from under a
+finding. See
+[`.cursor/skills/bugbot-and-code-review/`](.cursor/skills/bugbot-and-code-review/SKILL.md)
+for how that gate works and how to enable Bugbot + its Autofix feature
+(also dashboard-only) so flagged issues get fixed automatically too.
+
 ## Skills
 
 This repo uses [Cursor Agent Skills](https://cursor.com/docs/skills) to
