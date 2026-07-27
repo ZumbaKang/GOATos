@@ -39,6 +39,7 @@ pub mod pit;
 pub mod serial;
 pub mod shell;
 pub mod sync;
+pub mod task;
 pub mod tss;
 pub mod vga;
 
@@ -320,11 +321,23 @@ pub extern "C" fn kernel_main() -> ! {
         "Shell: line editor ({} chars) + builtins (help/clear/echo/about)",
         shell::LINE_CAPACITY
     );
+
+    // Cooperative tasks (roadmap 4.3): this context becomes the shell task;
+    // a second task prints a once-a-second counter so the two visibly
+    // interleave. Yields are explicit - no timer preemption yet.
+    task::init();
+    let demo_id = task::spawn(demo_counter_task).expect("demo counter task slot");
+    diag_println!(
+        "Tasks: cooperative switching ({} tasks, shell + demo counter {})",
+        task::count(),
+        demo_id
+    );
+
     shell::init();
 
-    // Idle: sleep until the next IRQ, feed typed keys into the line editor,
-    // and once a second prove the tick counter is actually advancing.
-    idle_with_input();
+    // Shell task: drain typed keys, report PIT ticks, yield to the demo
+    // task, then sleep until the next IRQ wakes us.
+    shell_task();
 }
 
 /// Parks the CPU for good, waking only to halt again. Used by an exception
@@ -335,10 +348,12 @@ pub fn hlt_loop() -> ! {
     }
 }
 
-/// Idles like [`hlt_loop`], but wakes on each IRQ to:
-/// - drain the keyboard input queue into the shell (roadmap 4.1 / 4.2),
-/// - report the PIT tick counter once per second (roadmap 3.1).
-fn idle_with_input() -> ! {
+/// Shell cooperative task (task 0): line editor + once-a-second PIT report.
+///
+/// After each pass it [`task::yield_now`]s so the demo counter can run, then
+/// `hlt`s until the next IRQ. The PIT tick is what wakes us again, which is
+/// also what makes the two tasks interleave on a one-second cadence.
+fn shell_task() -> ! {
     let mut editor = shell::LineEditor::new();
     let mut last_second = 0u32;
     loop {
@@ -351,7 +366,27 @@ fn idle_with_input() -> ! {
             // land mid-edit whenever a second boundary falls between keystrokes.
             serial_println!("PIT: tick {} ({} s)", pit::ticks(), second);
         }
+        task::yield_now();
+        // SAFETY: waking on the next IRQ is the idle path; the PIT handler
+        // will return here so we can yield to the demo task again.
         unsafe { asm!("hlt") };
+    }
+}
+
+/// Background cooperative task: prints an increasing counter once a second
+/// over VGA + serial, then yields. Together with [`shell_task`]'s PIT lines
+/// this is the roadmap 4.3 "visibly interleave" proof.
+fn demo_counter_task() -> ! {
+    let mut last_second = 0u32;
+    let mut count = 0u32;
+    loop {
+        let second = pit::seconds();
+        if second > last_second {
+            last_second = second;
+            count = count.saturating_add(1);
+            diag_println!("Task: demo counter {}", count);
+        }
+        task::yield_now();
     }
 }
 
