@@ -6,20 +6,21 @@
 //! 1. installs an IRQ1 handler that reads that byte,
 //! 2. tracks Shift so letters can come out upper- or lower-case,
 //! 3. translates a basic US layout (letters, digits, space, enter, backspace)
-//!    to ASCII and echoes it to VGA (and serial, so headless CI can see it),
+//!    to a [`crate::input::KeyEvent`] and pushes it onto the input queue,
 //! 4. unmasks IRQ1 so the interrupts actually arrive.
 //!
-//! BIOS/firmware already leaves the controller in scancode set 1 on every
-//! machine this kernel targets, so there is no controller programming step -
-//! just a handler and an unmask. Extended (`0xe0`-prefixed) keys are ignored
-//! for now; a real line editor / queue is roadmap 3.3+.
+//! Echoing / acting on keys is the consumer's job (see roadmap 3.3) - the
+//! handler only enqueues. BIOS/firmware already leaves the controller in
+//! scancode set 1 on every machine this kernel targets, so there is no
+//! controller programming step. Extended (`0xe0`-prefixed) keys are ignored
+//! for now.
 
 use core::arch::asm;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use crate::idt::{self, StackFrame};
+use crate::input::{self, KeyEvent};
 use crate::pic::{self, IRQ_VECTOR_BASE};
-use crate::{serial_print, serial_println, vga, vga_print, vga_println};
 
 /// IRQ line the keyboard controller drives.
 pub const IRQ: u8 = 1;
@@ -53,8 +54,8 @@ const SCAN_SPACE: u8 = 0x39;
 static EXTENDED: AtomicBool = AtomicBool::new(false);
 /// Either Shift key is currently held.
 static SHIFT: AtomicBool = AtomicBool::new(false);
-/// Make codes translated to a printable/echoed key since [`init`].
-static ECHOED: AtomicU32 = AtomicU32::new(0);
+/// Make codes translated and enqueued since [`init`].
+static ENQUEUED: AtomicU32 = AtomicU32::new(0);
 
 /// Installs the IRQ1 handler and unmasks the line.
 ///
@@ -67,7 +68,7 @@ static ECHOED: AtomicU32 = AtomicU32::new(0);
 pub fn init() {
     EXTENDED.store(false, Ordering::Relaxed);
     SHIFT.store(false, Ordering::Relaxed);
-    ECHOED.store(0, Ordering::Relaxed);
+    ENQUEUED.store(0, Ordering::Relaxed);
 
     // Drain any byte the firmware left sitting in the output buffer so the
     // first IRQ we see is for a real keystroke, not a stale ACK.
@@ -83,10 +84,10 @@ pub fn init() {
     pic::unmask(IRQ);
 }
 
-/// How many keys have been echoed since [`init`]. Useful for tests; ordinary
-/// code does not need it.
-pub fn echoed_count() -> u32 {
-    ECHOED.load(Ordering::Relaxed)
+/// How many keys have been enqueued since [`init`]. Useful for tests;
+/// ordinary code does not need it.
+pub fn enqueued_count() -> u32 {
+    ENQUEUED.load(Ordering::Relaxed)
 }
 
 extern "x86-interrupt" fn keyboard_interrupt(_frame: StackFrame) {
@@ -104,7 +105,7 @@ extern "x86-interrupt" fn keyboard_interrupt(_frame: StackFrame) {
         return;
     };
 
-    // Acknowledge before echoing: printing takes the IrqMutex path, and
+    // Acknowledge before translating: the queue push takes IrqMutex, and
     // leaving IRQ1 in service would also block IRQ0 (the timer).
     let _ = pic::end_of_interrupt(IRQ);
 
@@ -134,81 +135,59 @@ fn handle_scancode(scancode: u8) {
         _ => {}
     }
 
-    match translate(make) {
-        Some(Key::Char(c)) => {
-            vga_print!("{}", c);
-            serial_print!("{}", c);
-            ECHOED.fetch_add(1, Ordering::Relaxed);
+    if let Some(event) = translate(make) {
+        if input::push(event) {
+            ENQUEUED.fetch_add(1, Ordering::Relaxed);
         }
-        Some(Key::Enter) => {
-            vga_println!();
-            serial_println!();
-            ECHOED.fetch_add(1, Ordering::Relaxed);
-        }
-        Some(Key::Backspace) => {
-            vga::backspace();
-            // Erase the previous character on a serial terminal that
-            // understands the usual backspace-space-backspace sequence.
-            serial_print!("\x08 \x08");
-            ECHOED.fetch_add(1, Ordering::Relaxed);
-        }
-        None => {}
     }
 }
 
-/// What a make code turned into, if anything.
-enum Key {
-    Char(char),
-    Enter,
-    Backspace,
-}
-
-/// Set-1 make code → key, applying the current Shift state for letters.
-fn translate(make: u8) -> Option<Key> {
+/// Set-1 make code → event, applying the current Shift state for letters.
+fn translate(make: u8) -> Option<KeyEvent> {
     let shift = SHIFT.load(Ordering::Relaxed);
     Some(match make {
-        SCAN_ENTER => Key::Enter,
-        SCAN_BACKSPACE => Key::Backspace,
-        SCAN_SPACE => Key::Char(' '),
+        SCAN_ENTER => KeyEvent::Enter,
+        SCAN_BACKSPACE => KeyEvent::Backspace,
+        SCAN_SPACE => KeyEvent::Char(' '),
         // Digits, top row (unshifted forms only - shifted symbols are out of
         // scope for the basic layout).
-        0x02 => Key::Char('1'),
-        0x03 => Key::Char('2'),
-        0x04 => Key::Char('3'),
-        0x05 => Key::Char('4'),
-        0x06 => Key::Char('5'),
-        0x07 => Key::Char('6'),
-        0x08 => Key::Char('7'),
-        0x09 => Key::Char('8'),
-        0x0a => Key::Char('9'),
-        0x0b => Key::Char('0'),
+        0x02 => KeyEvent::Char('1'),
+        0x03 => KeyEvent::Char('2'),
+        0x04 => KeyEvent::Char('3'),
+        0x05 => KeyEvent::Char('4'),
+        0x06 => KeyEvent::Char('5'),
+        0x07 => KeyEvent::Char('6'),
+        0x08 => KeyEvent::Char('7'),
+        0x09 => KeyEvent::Char('8'),
+        0x0a => KeyEvent::Char('9'),
+        0x0b => KeyEvent::Char('0'),
         // Letters.
-        0x1e => Key::Char(letter('a', shift)),
-        0x30 => Key::Char(letter('b', shift)),
-        0x2e => Key::Char(letter('c', shift)),
-        0x20 => Key::Char(letter('d', shift)),
-        0x12 => Key::Char(letter('e', shift)),
-        0x21 => Key::Char(letter('f', shift)),
-        0x22 => Key::Char(letter('g', shift)),
-        0x23 => Key::Char(letter('h', shift)),
-        0x17 => Key::Char(letter('i', shift)),
-        0x24 => Key::Char(letter('j', shift)),
-        0x25 => Key::Char(letter('k', shift)),
-        0x26 => Key::Char(letter('l', shift)),
-        0x32 => Key::Char(letter('m', shift)),
-        0x31 => Key::Char(letter('n', shift)),
-        0x18 => Key::Char(letter('o', shift)),
-        0x19 => Key::Char(letter('p', shift)),
-        0x10 => Key::Char(letter('q', shift)),
-        0x13 => Key::Char(letter('r', shift)),
-        0x1f => Key::Char(letter('s', shift)),
-        0x14 => Key::Char(letter('t', shift)),
-        0x16 => Key::Char(letter('u', shift)),
-        0x2f => Key::Char(letter('v', shift)),
-        0x11 => Key::Char(letter('w', shift)),
-        0x2d => Key::Char(letter('x', shift)),
-        0x15 => Key::Char(letter('y', shift)),
-        0x2c => Key::Char(letter('z', shift)),
+        0x1e => KeyEvent::Char(letter('a', shift)),
+        0x30 => KeyEvent::Char(letter('b', shift)),
+        0x2e => KeyEvent::Char(letter('c', shift)),
+        0x20 => KeyEvent::Char(letter('d', shift)),
+        0x12 => KeyEvent::Char(letter('e', shift)),
+        0x21 => KeyEvent::Char(letter('f', shift)),
+        0x22 => KeyEvent::Char(letter('g', shift)),
+        0x23 => KeyEvent::Char(letter('h', shift)),
+        0x17 => KeyEvent::Char(letter('i', shift)),
+        0x24 => KeyEvent::Char(letter('j', shift)),
+        0x25 => KeyEvent::Char(letter('k', shift)),
+        0x26 => KeyEvent::Char(letter('l', shift)),
+        0x32 => KeyEvent::Char(letter('m', shift)),
+        0x31 => KeyEvent::Char(letter('n', shift)),
+        0x18 => KeyEvent::Char(letter('o', shift)),
+        0x19 => KeyEvent::Char(letter('p', shift)),
+        0x10 => KeyEvent::Char(letter('q', shift)),
+        0x13 => KeyEvent::Char(letter('r', shift)),
+        0x1f => KeyEvent::Char(letter('s', shift)),
+        0x14 => KeyEvent::Char(letter('t', shift)),
+        0x16 => KeyEvent::Char(letter('u', shift)),
+        0x2f => KeyEvent::Char(letter('v', shift)),
+        0x11 => KeyEvent::Char(letter('w', shift)),
+        0x2d => KeyEvent::Char(letter('x', shift)),
+        0x15 => KeyEvent::Char(letter('y', shift)),
+        0x2c => KeyEvent::Char(letter('z', shift)),
         _ => return None,
     })
 }

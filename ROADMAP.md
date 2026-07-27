@@ -282,13 +282,20 @@ Needs Phase 1 (interrupts) done first.
       `0xfc/0xff`. Verified with QEMU monitor `sendkey` (typed text appears
       on the VGA screendump and in the serial log) and against the v86 web
       demo.
-- [ ] **3.3 - Input event queue.** A small fixed-size ring buffer (no heap
+- [x] **3.3 - Input event queue.** A small fixed-size ring buffer (no heap
       needed, or backed by the new allocator if Phase 2 is done) that
       decouples "a key was pressed" (interrupt context) from "something
       reads and acts on it" (normal code).
       *Done when:* a simple loop in `kernel_main` can drain the queue and
       echo typed characters, with no dropped/duplicated keys under normal
       typing speed.
+      *Done as:* `kernel/src/input.rs` is a 64-slot ring buffer behind
+      `IrqMutex`. The IRQ1 handler only translates and `push`es; the idle
+      loop `pop`s and echoes to VGA + serial. A full queue drops the newest
+      event (never blocks the handler) and counts drops. Verified with QEMU
+      monitor `sendkey` (typed text appears on the VGA screendump and in the
+      serial log with no missing/duplicated characters) and against the v86
+      web demo.
 
 ---
 

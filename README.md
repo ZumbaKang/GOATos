@@ -22,7 +22,8 @@ and a "hello world" on screen.
       physical frame allocator, identity-mapped paging, a kernel heap with
       `#[global_allocator]`/`alloc`, and an unmapped guard page below the
       kernel stack so overflow double-faults instead of corrupting memory.
-- [ ] Keyboard input
+- [x] Keyboard input (PIT timer + PS/2 keyboard on IRQ0/IRQ1, input event
+      queue decoupling the IRQ handler from consumers)
 - [ ] A minimal shell
 - [ ] Graphics mode + a basic GUI
 - [ ] ...and much more, one step at a time.
