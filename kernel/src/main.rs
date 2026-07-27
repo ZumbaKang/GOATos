@@ -238,18 +238,20 @@ pub extern "C" fn kernel_main() -> ! {
     vga_println!("{}", heap_test);
     serial_println!("{}", heap_test);
 
-    // Pin the heap/stack layout in writing and check the ranges are still
-    // disjoint. The stacks live inside the reserved kernel image; the heap
-    // is carved from free frames outside it - so by construction they cannot
-    // collide, and a failure here means that construction broke.
+    // Pin the heap/stack/guard layout in writing and check the ranges are
+    // still right. The stacks and the unmapped guard live inside the reserved
+    // kernel image; the heap is carved from free frames outside it - so by
+    // construction they cannot collide, and a failure here means that
+    // construction broke.
     let layout = memory::layout::check(heap);
     vga_println!("{}", layout);
     serial_println!("{}", layout);
     // Also dump the absolute ranges over serial so a CI script can re-derive
-    // disjointness itself, rather than trusting the kernel's verdict.
+    // adjacency/disjointness itself, rather than trusting the kernel's verdict.
     serial_println!("Layout: image {}", layout.kernel_image);
-    serial_println!("Layout: kstack {}", layout.kernel_stack);
     serial_println!("Layout: dfstack {}", layout.double_fault_stack);
+    serial_println!("Layout: guard {}", layout.guard_page);
+    serial_println!("Layout: kstack {}", layout.kernel_stack);
     serial_println!("Layout: heap {}", layout.heap);
 
     // The last piece of setup, and the first moment the kernel can be

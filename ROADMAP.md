@@ -208,7 +208,7 @@ want `Vec`/`Box`/`String`).
       are sized correctly, nested correctly, and pairwise disjoint. The
       banner prints the three ranges; `scripts/ci-test.sh` re-parses them
       and re-derives disjointness itself.
-- [ ] **2.6 - Guard page below the kernel stack.** Now that paging exists,
+- [x] **2.6 - Guard page below the kernel stack.** Now that paging exists,
       leave the page below the kernel stack unmapped so an overflow faults
       immediately instead of silently scribbling over whatever `.bss`
       happens to sit underneath. This is what finishes task 1.4: the
@@ -222,6 +222,14 @@ want `Vec`/`Box`/`String`).
       recursion behind a `trigger-stack-overflow` feature) prints the
       double-fault report from 1.4 instead of corrupting memory or
       rebooting.
+      *Done as:* `entry.s` lays out DF stack | 4 KiB guard | 64 KiB kernel
+      stack, page-aligned; `paging::init` identity-maps everything else but
+      leaves that guard PTE not-present; `layout::check` asserts the three
+      ranges are adjacent and that `paging::is_present` says the guard is
+      still unmapped. `KERNEL_FEATURES=trigger-stack-overflow` recurses until
+      `esp` grows into the hole; pushing the #PF frame fails and the CPU
+      escalates to the vector-8 task gate, printing the double-fault report
+      on the private stack.
 
 ---
 

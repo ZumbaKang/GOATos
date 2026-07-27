@@ -235,11 +235,10 @@ pub fn trigger_debug_exception() {
         // during delivery, and two "contributory" exceptions in a row are the
         // architectural definition of a double fault.
         //
-        // The obvious cause of one, a stack overflow, can't be provoked yet:
-        // with no paging there is no guard page below the kernel stack, and
-        // segment limits (the other way to bound a stack) are not enforced by
-        // QEMU's or v86's CPU emulation - so an overflow silently scribbles
-        // over memory instead of faulting. See roadmap 2.6.
+        // A stack overflow is the textbook cause; `trigger-stack-overflow`
+        // covers that once the guard page from roadmap 2.6 is in place. This
+        // path stays as the "fault during delivery" shape, which does not
+        // depend on paging.
         //
         // SAFETY: leaving #0 unhandled is the point, and the double-fault task
         // halts, so nothing after this runs.
@@ -290,5 +289,28 @@ pub fn trigger_debug_exception() {
                 options(att_syntax, nostack),
             );
         }
+    }
+
+    #[cfg(feature = "trigger-stack-overflow")]
+    {
+        diag_println!("DEBUG: overflowing the kernel stack on purpose...");
+        diag_println!("DEBUG: (esp should grow into the unmapped guard page and double-fault)");
+        // Each frame burns stack with a volatile write so LLVM cannot turn the
+        // recursion into a jump. `inline(never)` keeps the call from being
+        // flattened away. When `esp` lands in the guard page, pushing the #PF
+        // frame fails and the CPU escalates to a double fault on the private
+        // stack - which is the whole point of roadmap 2.6.
+        #[inline(never)]
+        fn blow_stack() -> ! {
+            let mut pad = [0u8; 256];
+            // SAFETY: writing into our own stack-local buffer.
+            unsafe {
+                core::ptr::write_volatile(pad.as_mut_ptr(), 0xaa);
+            }
+            // Keep `pad` live across the recursive call.
+            core::hint::black_box(&pad);
+            blow_stack();
+        }
+        blow_stack();
     }
 }

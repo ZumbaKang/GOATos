@@ -262,11 +262,17 @@ if ! grep -qE "Heap: 0x[0-9a-f]+-0x[0-9a-f]+ \(1024 KiB\), free-list allocator r
   status=1
 fi
 
-# Heap vs stack layout. The kernel's own check is necessary but not sufficient
-# on its own (a broken predicate can bless itself); re-parse the absolute
-# ranges from the log and re-derive disjointness here.
-if ! grep -q "Layout: kernel stack" "$LOG_FILE"; then
-  echo "FAIL: kernel did not report the heap/stack layout"
+# Heap vs stack layout, including the unmapped guard page between the DF
+# stack and the kernel stack. The kernel's own check is necessary but not
+# sufficient on its own (a broken predicate can bless itself); re-parse the
+# absolute ranges from the log and re-derive adjacency/disjointness here.
+if ! grep -q "Paging: stack guard page" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report an unmapped stack guard page"
+  status=1
+fi
+
+if ! grep -q "Layout: DF stack" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report the heap/stack/guard layout"
   status=1
 fi
 
@@ -275,26 +281,29 @@ if grep -q "Layout: OVERLAP/MISMATCH" "$LOG_FILE"; then
   status=1
 fi
 
-if ! grep -qE "Layout: kernel stack 0x[0-9a-f]+-0x[0-9a-f]+ \(64 KiB\), DF stack 0x[0-9a-f]+-0x[0-9a-f]+ \(4 KiB\), heap 0x[0-9a-f]+-0x[0-9a-f]+ \(1024 KiB\) - disjoint" "$LOG_FILE"; then
-  echo "FAIL: layout banner missing the expected stack/heap sizes or disjoint verdict"
+if ! grep -qE "Layout: DF stack 0x[0-9a-f]+-0x[0-9a-f]+ \(4 KiB\), guard 0x[0-9a-f]+-0x[0-9a-f]+ \(4 KiB, unmapped\), kernel stack 0x[0-9a-f]+-0x[0-9a-f]+ \(64 KiB\), heap 0x[0-9a-f]+-0x[0-9a-f]+ \(1024 KiB\) - ok" "$LOG_FILE"; then
+  echo "FAIL: layout banner missing the expected stack/guard/heap sizes or ok verdict"
   status=1
 fi
 
 layout_image="$(sed -n 's/^Layout: image 0x\([0-9a-f]\+\)-0x\([0-9a-f]\+\)$/\1 \2/p' "$LOG_FILE" | head -1)"
-layout_kstack="$(sed -n 's/^Layout: kstack 0x\([0-9a-f]\+\)-0x\([0-9a-f]\+\)$/\1 \2/p' "$LOG_FILE" | head -1)"
 layout_dfstack="$(sed -n 's/^Layout: dfstack 0x\([0-9a-f]\+\)-0x\([0-9a-f]\+\)$/\1 \2/p' "$LOG_FILE" | head -1)"
+layout_guard="$(sed -n 's/^Layout: guard 0x\([0-9a-f]\+\)-0x\([0-9a-f]\+\)$/\1 \2/p' "$LOG_FILE" | head -1)"
+layout_kstack="$(sed -n 's/^Layout: kstack 0x\([0-9a-f]\+\)-0x\([0-9a-f]\+\)$/\1 \2/p' "$LOG_FILE" | head -1)"
 layout_heap="$(sed -n 's/^Layout: heap 0x\([0-9a-f]\+\)-0x\([0-9a-f]\+\)$/\1 \2/p' "$LOG_FILE" | head -1)"
 
-if [ -z "$layout_image" ] || [ -z "$layout_kstack" ] || [ -z "$layout_dfstack" ] || [ -z "$layout_heap" ]; then
-  echo "FAIL: kernel did not print absolute layout ranges for image/kstack/dfstack/heap"
+if [ -z "$layout_image" ] || [ -z "$layout_dfstack" ] || [ -z "$layout_guard" ] || [ -z "$layout_kstack" ] || [ -z "$layout_heap" ]; then
+  echo "FAIL: kernel did not print absolute layout ranges for image/dfstack/guard/kstack/heap"
   status=1
 else
   # shellcheck disable=SC2086
   set -- $layout_image; image_lo=$((16#$1)); image_hi=$((16#$2))
   # shellcheck disable=SC2086
-  set -- $layout_kstack; kstack_lo=$((16#$1)); kstack_hi=$((16#$2))
-  # shellcheck disable=SC2086
   set -- $layout_dfstack; dfstack_lo=$((16#$1)); dfstack_hi=$((16#$2))
+  # shellcheck disable=SC2086
+  set -- $layout_guard; guard_lo=$((16#$1)); guard_hi=$((16#$2))
+  # shellcheck disable=SC2086
+  set -- $layout_kstack; kstack_lo=$((16#$1)); kstack_hi=$((16#$2))
   # shellcheck disable=SC2086
   set -- $layout_heap; heap_lo=$((16#$1)); heap_hi=$((16#$2))
 
@@ -304,6 +313,10 @@ else
   fi
   if [ "$((dfstack_hi - dfstack_lo))" -ne 4096 ]; then
     echo "FAIL: double-fault stack size is $((dfstack_hi - dfstack_lo)) bytes, expected 4 KiB"
+    status=1
+  fi
+  if [ "$((guard_hi - guard_lo))" -ne 4096 ]; then
+    echo "FAIL: guard page size is $((guard_hi - guard_lo)) bytes, expected 4 KiB"
     status=1
   fi
   if [ "$((heap_hi - heap_lo))" -ne $((1024 * 1024)) ]; then
@@ -316,6 +329,19 @@ else
   fi
   if [ "$dfstack_lo" -lt "$image_lo" ] || [ "$dfstack_hi" -gt "$image_hi" ]; then
     echo "FAIL: double-fault stack is outside the kernel image"
+    status=1
+  fi
+  if [ "$guard_lo" -lt "$image_lo" ] || [ "$guard_hi" -gt "$image_hi" ]; then
+    echo "FAIL: guard page is outside the kernel image"
+    status=1
+  fi
+  # entry.s order: DF stack | guard | kernel stack.
+  if [ "$dfstack_hi" -ne "$guard_lo" ]; then
+    echo "FAIL: double-fault stack is not immediately below the guard page"
+    status=1
+  fi
+  if [ "$guard_hi" -ne "$kstack_lo" ]; then
+    echo "FAIL: guard page is not immediately below the kernel stack"
     status=1
   fi
   # Half-open ranges overlap when a_lo < b_hi && b_lo < a_hi.

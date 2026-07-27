@@ -13,6 +13,11 @@
 //! translation is a no-op for every address that matters, which is exactly
 //! what lets the existing code keep running after paging is enabled.
 //!
+//! One deliberate hole: the 4 KiB page immediately below the kernel stack
+//! (`stack_guard_page` in `entry.s`) is left not-present. An overflow that
+//! grows `esp` into that page cannot push an interrupt frame, so the resulting
+//! page fault escalates to a double fault on the private stack from task 1.4.
+//!
 //! Layout, 32-bit non-PAE (two levels, 4 KiB pages):
 //!
 //! ```text
@@ -70,6 +75,9 @@ pub struct Report {
     page_tables: usize,
     /// Whether `CR0.PG` reads back as set after the enable sequence.
     paging_enabled: bool,
+    /// Start of the deliberately unmapped stack guard page, or 0 if setup
+    /// failed before one could be reserved.
+    stack_guard: u32,
 }
 
 impl Report {
@@ -92,6 +100,11 @@ impl Report {
     pub fn paging_enabled(self) -> bool {
         self.paging_enabled
     }
+
+    /// Start address of the unmapped stack guard page.
+    pub fn stack_guard(self) -> u32 {
+        self.stack_guard
+    }
 }
 
 impl fmt::Display for Report {
@@ -109,8 +122,21 @@ impl fmt::Display for Report {
             self.page_tables,
             self.cr3,
             pg
-        )
+        )?;
+        if self.stack_guard != 0 {
+            write!(
+                f,
+                "\nPaging: stack guard page {:#010x}-{:#010x} unmapped",
+                self.stack_guard,
+                self.stack_guard + FRAME_SIZE
+            )?;
+        }
+        Ok(())
     }
+}
+
+extern "C" {
+    static stack_guard_page: u8;
 }
 
 /// Builds an identity map covering every usable frame below 4 GiB (plus the
@@ -129,8 +155,15 @@ pub fn init(map: &MemoryMap) -> Report {
             mapped_end: 0,
             page_tables: 0,
             paging_enabled: false,
+            stack_guard: 0,
         };
     }
+
+    // The page immediately below the kernel stack - left not-present so an
+    // overflow faults instead of corrupting the double-fault stack that sits
+    // under it. Address only; the bytes are never touched.
+    let stack_guard = core::ptr::addr_of!(stack_guard_page) as u32;
+    debug_assert!(stack_guard.is_multiple_of(FRAME_SIZE));
 
     let page_table_count = (mapped_end / BYTES_PER_DIRECTORY_ENTRY) as usize;
 
@@ -140,6 +173,7 @@ pub fn init(map: &MemoryMap) -> Report {
             mapped_end: 0,
             page_tables: 0,
             paging_enabled: false,
+            stack_guard: 0,
         };
     };
 
@@ -153,12 +187,17 @@ pub fn init(map: &MemoryMap) -> Report {
                 mapped_end: 0,
                 page_tables: 0,
                 paging_enabled: false,
+                stack_guard: 0,
             };
         };
 
         let base = (table_index as u32) * BYTES_PER_DIRECTORY_ENTRY;
         for page_index in 0..ENTRIES {
             let phys = base + (page_index as u32) * FRAME_SIZE;
+            // Deliberate hole: the stack guard page stays not-present.
+            if phys == stack_guard {
+                continue;
+            }
             write_entry(table, page_index, phys | KERNEL_PAGE);
         }
         write_entry(directory, table_index, table.start_address() | KERNEL_PAGE);
@@ -171,10 +210,11 @@ pub fn init(map: &MemoryMap) -> Report {
     // with paging on would switch onto a directory of zeroes and triple-fault.
     tss::set_page_directory(cr3);
 
-    // SAFETY: `cr3` points at a zeroed, fully-populated page directory whose
-    // identity map covers every address this kernel currently executes,
-    // reads, or writes - including the directory and tables themselves, the
-    // kernel image, both stacks, and the VGA text buffer. Enabling paging
+    // SAFETY: `cr3` points at a zeroed page directory whose identity map
+    // covers every address this kernel currently executes, reads, or writes -
+    // including the directory and tables themselves, the kernel image, both
+    // stacks, and the VGA text buffer - with the single exception of the
+    // stack guard page, which nothing is supposed to touch. Enabling paging
     // under any thinner map would page-fault on the next instruction.
     unsafe {
         enable(cr3);
@@ -182,6 +222,9 @@ pub fn init(map: &MemoryMap) -> Report {
 
     let enabled = paging_is_enabled();
     let active_cr3 = read_cr3();
+    // Confirm the hole stuck: a present PTE here would mean the skip above
+    // never ran, and stack overflow would corrupt memory again.
+    let guard_unmapped = !is_present(stack_guard);
 
     Report {
         // Prefer the value the CPU accepted over the one we wrote, so a
@@ -189,8 +232,31 @@ pub fn init(map: &MemoryMap) -> Report {
         cr3: active_cr3,
         mapped_end,
         page_tables: page_table_count,
-        paging_enabled: enabled && active_cr3 == cr3,
+        paging_enabled: enabled && active_cr3 == cr3 && guard_unmapped,
+        stack_guard: if guard_unmapped { stack_guard } else { 0 },
     }
+}
+
+/// Whether the page containing `virt` has its present bit set in the active
+/// page tables. Used by the layout check to prove the stack guard stayed
+/// unmapped after [`init`].
+pub fn is_present(virt: u32) -> bool {
+    let cr3 = read_cr3();
+    if cr3 == 0 {
+        return false;
+    }
+    let pd_index = (virt / BYTES_PER_DIRECTORY_ENTRY) as usize;
+    let pt_index = ((virt % BYTES_PER_DIRECTORY_ENTRY) / FRAME_SIZE) as usize;
+    // SAFETY: `cr3` is the directory we installed (or zero, handled above).
+    // Reading a PDE/PTE is a plain load through the identity map; directory
+    // and tables are themselves mapped.
+    let pde = unsafe { read_entry(Frame::containing_address(cr3), pd_index) };
+    if pde & PRESENT == 0 {
+        return false;
+    }
+    let table = Frame::containing_address(pde & !(FRAME_SIZE - 1));
+    let pte = unsafe { read_entry(table, pt_index) };
+    pte & PRESENT != 0
 }
 
 /// Exclusive end of the window [`init`] identity-maps: the highest usable
@@ -239,6 +305,16 @@ fn write_entry(table: Frame, index: usize, value: u32) {
         let ptr = (table.start_address() as *mut u32).add(index);
         ptr::write_volatile(ptr, value);
     }
+}
+
+/// # Safety
+///
+/// `table` must be a mapped page-directory or page-table frame, and `index`
+/// must be in `0..ENTRIES`.
+unsafe fn read_entry(table: Frame, index: usize) -> u32 {
+    debug_assert!(index < ENTRIES);
+    let ptr = (table.start_address() as *const u32).add(index);
+    ptr::read_volatile(ptr)
 }
 
 /// Loads `CR3` and sets `CR0.PG`.
