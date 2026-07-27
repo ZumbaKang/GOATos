@@ -44,6 +44,10 @@ trigger-spurious-irq = []
 # unmapped guard page below it; the resulting page fault cannot push a frame
 # and escalates to a double fault on the private stack (roadmap 2.6).
 trigger-stack-overflow = []
+# Raises a software interrupt while both print locks are held, so the
+# catch-all's report has to take the IrqMutex re-entry path instead of
+# deadlocking (roadmap 3.0).
+trigger-print-reentrancy = []
 
 [profile.dev]
 panic = "abort"

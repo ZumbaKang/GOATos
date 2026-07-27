@@ -240,7 +240,7 @@ phase is really two new drivers, following that skill's conventions)
 
 Needs Phase 1 (interrupts) done first.
 
-- [ ] **3.0 - Make printing safe from interrupt context.** `vga::_print` and
+- [x] **3.0 - Make printing safe from interrupt context.** `vga::_print` and
       `serial::_print` take a spin lock, so a handler that prints while the
       interrupted code held that lock deadlocks instead of printing - and every
       handler in the kernel prints. Nothing can hit this today (no IRQ line is
@@ -251,6 +251,13 @@ Needs Phase 1 (interrupts) done first.
       *Done when:* a handler that fires while a print is in progress reports
       instead of hanging - verified deliberately, e.g. by raising an interrupt
       from inside a print behind a `trigger-*` feature.
+      *Done as:* both writers sit behind `sync::IrqMutex`, which `cli`s for the
+      critical section (so a maskable IRQ never observes the lock as held) and,
+      if something that ignores IF re-enters anyway, still runs the closure
+      rather than spinning - the interrupted holder is suspended on this CPU.
+      `KERNEL_FEATURES=trigger-print-reentrancy` holds both locks and fires
+      `int $0x60`; the catch-all's report lands and the kernel prints
+      `print reentrancy ok` afterwards.
 - [ ] **3.1 - PIT (timer) driver.** Program the 8253/8254 PIT to a fixed
       frequency, add an IRQ0 handler that increments a tick counter.
       *Done when:* the kernel can print an increasing tick count (e.g.

@@ -23,11 +23,11 @@
 //! catch-all is what makes that safe to get wrong - an unmasked line with no
 //! driver behind it prints a diagnostic instead of taking the machine down.
 //!
-//! That masking is also the only reason reporting from here is safe: the report
-//! takes the VGA writer's lock, so an interrupt arriving *during* a print would
-//! deadlock rather than report. Nothing can interrupt a print while every line
-//! is masked; the first driver to unmask one has to deal with it, which is
-//! `ROADMAP.md` task 3.0.
+//! Reporting is safe even if an interrupt arrives mid-print: the VGA and serial
+//! writers use [`crate::sync::IrqMutex`], which masks IRQs while the lock is
+//! held and still lets a re-entered handler print if something that ignores IF
+//! (a software `int`, or a CPU exception) nests into a critical section. That
+//! is what roadmap 3.0 added, and what [`trigger_print_reentrancy`] verifies.
 
 use core::arch::asm;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -385,6 +385,37 @@ pub fn trigger_debug_interrupt() {
         unsafe { asm!("int $0x27", options(att_syntax)) };
         diag_println!(
             "DEBUG: resumed after the report ({} unhandled so far)",
+            unhandled_count()
+        );
+    }
+}
+
+/// Holds both print locks and raises a software interrupt, so the catch-all's
+/// `diag_println!` has to re-enter the writers instead of spinning forever on
+/// them - the verification for roadmap 3.0.
+///
+/// A normal build compiles this to nothing. Enable with
+/// `make run KERNEL_FEATURES=trigger-print-reentrancy`.
+pub fn trigger_print_reentrancy() {
+    #[cfg(feature = "trigger-print-reentrancy")]
+    {
+        use crate::serial;
+        use crate::vga;
+
+        diag_println!("DEBUG: holding both print locks, then taking vector 0x60...");
+        // `int` ignores IF, so masking interrupts inside `IrqMutex::with` is
+        // not what makes this safe - the re-entry path is. Holding *both*
+        // locks means the handler's `diag_println!` exercises that path on
+        // VGA and serial together.
+        //
+        // SAFETY: 0x60 has the catch-all installed and it returns, so the
+        // line printed after this is reachable - and is the proof we did not
+        // deadlock.
+        vga::with_lock_held(|| {
+            serial::with_lock_held(|| unsafe { asm!("int $0x60", options(att_syntax)) });
+        });
+        diag_println!(
+            "DEBUG: print reentrancy ok (handler reported while locks held; {} unhandled)",
             unhandled_count()
         );
     }
