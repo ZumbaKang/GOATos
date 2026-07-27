@@ -253,7 +253,7 @@ unsafe fn enable(page_directory: u32) {
     asm!(
         "mov {pd}, %cr3",
         "mov %cr0, %eax",
-        "orl {pg}, %eax",
+        "orl ${pg}, %eax",
         "mov %eax, %cr0",
         pd = in(reg) page_directory,
         pg = const CR0_PG,
