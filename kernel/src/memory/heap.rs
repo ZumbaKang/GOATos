@@ -16,8 +16,8 @@
 //!
 //! Identity mapping means the heap's physical frames are already reachable at
 //! the same addresses, so there is nothing virtual to set up beyond what
-//! [`super::paging`] already did. Task 2.5 will pin the heap/stack layout in
-//! writing; for now the boot banner prints the range this module claimed.
+//! [`super::paging`] already did. The heap range is reported next to the
+//! kernel stacks by [`super::layout`] so the two cannot silently collide.
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt;

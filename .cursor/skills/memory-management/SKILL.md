@@ -1,9 +1,9 @@
 ---
 name: memory-management
-description: Guidance for implementing physical/virtual memory management in GOATos (a BIOS memory map, physical frame allocator, identity-mapped paging, and a kernel heap/`#[global_allocator]` exist). Use this when starting work on memory management, paging, or adding alloc/Vec/Box support to the kernel.
+description: Guidance for implementing physical/virtual memory management in GOATos (a BIOS memory map, physical frame allocator, identity-mapped paging, a kernel heap/`#[global_allocator]`, and a heap/stack layout check exist). Use this when starting work on memory management, paging, or adding alloc/Vec/Box support to the kernel.
 ---
 
-# Memory management (paging on, heap on)
+# Memory management (paging on, heap on, layout checked)
 
 GOATos boots with paging off (the bootloader - see `bootloader-and-linking` -
 leaves a flat 32-bit protected-mode address space), then
@@ -12,12 +12,12 @@ After that every address is still numerically equal to its physical frame,
 but only because the page tables say so. A kernel heap
 (`kernel/src/memory/heap.rs`) then carves out 1 MiB of contiguous frames and
 installs a free-list `#[global_allocator]`, so `alloc` (`Vec`, `Box`,
-`String`) is available.
+`String`) is available. `kernel/src/memory/layout.rs` records the heap and
+stack ranges and checks they stay disjoint at boot.
 
 What does exist is the **memory map**, a **physical frame allocator**,
-**identity-mapped paging**, and a **kernel heap** (steps 1-4 below). Layout
-documentation (2.5) and a stack guard page (2.6) are the remaining Phase 2
-tasks.
+**identity-mapped paging**, a **kernel heap**, and a **layout check**
+(steps 1-5 below). A stack guard page (2.6) is the remaining Phase 2 task.
 
 ## Suggested order of implementation
 
@@ -107,8 +107,17 @@ tasks.
      resizes (second allocation + free of the old buffer), reads back,
      and checks the used-byte count returns to baseline on drop.
    - The heap range is whatever contiguous run the bump cursor could
-     spare that boot - not a fixed link-time address. Task 2.5 is where
-     that range gets written down next to the stack's.
+     spare that boot - not a fixed link-time address. [`layout`] records
+     that range next to the kernel stacks and checks they stay disjoint.
+5. **Heap/stack layout check.** *Done* - `kernel/src/memory/layout.rs`
+   names the live ranges (kernel stack from `entry.s`, DF stack from
+   `tss`, heap from `heap::Report`, kernel image from the linker symbols)
+   and asserts at boot that the stacks sit inside the image, match their
+   documented sizes, and share no bytes with each other or the heap. The
+   construction that makes this hold is the frame allocator's reservation
+   of `__kernel_start..__kernel_end`; the check is what keeps a future
+   change from quietly undoing it. Task 2.6 (guard page below the kernel
+   stack) is next.
 
 ## Conventions to follow
 
