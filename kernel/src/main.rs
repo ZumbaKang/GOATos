@@ -34,6 +34,7 @@ pub mod interrupts;
 pub mod memory;
 pub mod pic;
 pub mod serial;
+pub mod sync;
 pub mod tss;
 pub mod vga;
 
@@ -270,11 +271,12 @@ pub extern "C" fn kernel_main() -> ! {
 
     serial_println!("GOATos booted successfully! (32-bit, from a hand-written bootloader)");
 
-    // Both compile to nothing unless a `trigger-*` feature is enabled, which is
-    // how the handlers above get verified against a real exception and a real
-    // unexpected interrupt.
+    // Compile to nothing unless a `trigger-*` feature is enabled, which is how
+    // the handlers / print path above get verified against a real exception, a
+    // real unexpected interrupt, or a real mid-print re-entry.
     exceptions::trigger_debug_exception();
     interrupts::trigger_debug_interrupt();
+    interrupts::trigger_print_reentrancy();
 
     // With every IRQ line masked there is nothing left to wake the CPU, so this
     // is where the kernel stays: idle in `hlt`, ready to report anything that

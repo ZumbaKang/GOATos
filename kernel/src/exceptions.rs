@@ -25,12 +25,9 @@
 //! state this kernel doesn't have yet, and a wrong guess about whether it is
 //! safe to resume turns one readable crash into an unreadable one.
 //!
-//! Known limitation: reporting goes through the VGA writer's lock, so an
-//! exception raised *while that lock is held* (i.e. from inside a print)
-//! deadlocks instead of reporting. Interrupts are enabled now, which makes
-//! that reachable in principle - but every IRQ line is still masked, so
-//! nothing can interrupt a print. The first driver to unmask a line is what
-//! makes it real; see `ROADMAP.md` task 3.0.
+//! Reporting goes through the VGA/serial writers, which use [`crate::sync::IrqMutex`]
+//! so a fault (or software interrupt) raised mid-print can still report
+//! instead of deadlocking - see roadmap 3.0.
 
 use core::arch::asm;
 
