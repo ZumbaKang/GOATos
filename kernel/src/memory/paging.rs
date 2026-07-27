@@ -267,7 +267,8 @@ pub fn is_present(virt: u32) -> bool {
 /// usable regions) is deliberate: the VGA text buffer at 0xb8000 sits in the
 /// legacy hole below 1 MiB, which no E820 usable region covers, and the
 /// kernel would fault the first time it printed after enabling paging if
-/// that hole were left unmapped.
+/// that hole were left unmapped. The Mode 13h framebuffer at 0xa0000 is in
+/// the same hole for the same reason.
 fn identity_map_end(map: &MemoryMap) -> u32 {
     let mut end: u64 = 0;
     for region in map.regions().iter().filter(|region| region.is_usable()) {

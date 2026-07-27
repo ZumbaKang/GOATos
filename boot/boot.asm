@@ -48,6 +48,13 @@ start:
     call get_disk_geometry
     call load_kernel
     call enable_a20
+
+    ; VGA mode 13h (320x200, 256-color planar/linear framebuffer at 0xA0000)
+    ; while INT 10h still works. After the protected-mode switch the BIOS is
+    ; unreachable, so this is the last chance to leave text mode.
+    mov ax, 0x0013
+    int 0x10
+
     lgdt [gdt_descriptor]
 
     mov eax, cr0
