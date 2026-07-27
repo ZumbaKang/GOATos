@@ -322,21 +322,23 @@ pub extern "C" fn kernel_main() -> ! {
         shell::LINE_CAPACITY
     );
 
-    // Cooperative tasks (roadmap 4.3): this context becomes the shell task;
-    // a second task prints a once-a-second counter so the two visibly
-    // interleave. Yields are explicit - no timer preemption yet.
+    // Round-robin scheduler (roadmap 4.4): this context becomes the shell
+    // task; two demo counters share a FIFO ready queue so three tasks take
+    // equal turns. Yields are still explicit - no timer preemption yet.
     task::init();
-    let demo_id = task::spawn(demo_counter_task).expect("demo counter task slot");
+    let demo_a = task::spawn(demo_a_task).expect("demo-a task slot");
+    let demo_b = task::spawn(demo_b_task).expect("demo-b task slot");
     diag_println!(
-        "Tasks: cooperative switching ({} tasks, shell + demo counter {})",
+        "Tasks: round-robin ready-queue ({} tasks, shell + demo-a {} + demo-b {})",
         task::count(),
-        demo_id
+        demo_a,
+        demo_b
     );
 
     shell::init();
 
-    // Shell task: drain typed keys, report PIT ticks, yield to the demo
-    // task, then sleep until the next IRQ wakes us.
+    // Shell task: drain typed keys, report PIT ticks / turn counts, yield
+    // into the ready queue, then sleep until the next IRQ wakes us.
     shell_task();
 }
 
@@ -348,11 +350,11 @@ pub fn hlt_loop() -> ! {
     }
 }
 
-/// Shell cooperative task (task 0): line editor + once-a-second PIT report.
+/// Shell cooperative task (task 0): line editor + once-a-second PIT / RR report.
 ///
-/// After each pass it [`task::yield_now`]s so the demo counter can run, then
-/// `hlt`s until the next IRQ. The PIT tick is what wakes us again, which is
-/// also what makes the two tasks interleave on a one-second cadence.
+/// After each pass it [`task::yield_now`]s into the ready queue (so the demo
+/// tasks run), then `hlt`s until the next IRQ. The PIT wake is what starts
+/// the next round-robin pass.
 fn shell_task() -> ! {
     let mut editor = shell::LineEditor::new();
     let mut last_second = 0u32;
@@ -362,21 +364,39 @@ fn shell_task() -> ! {
         let second = pit::seconds();
         if second > last_second {
             last_second = second;
-            // Serial only: CI greps this line, and printing it on VGA would
+            // Serial only: CI greps these lines, and printing them on VGA would
             // land mid-edit whenever a second boundary falls between keystrokes.
             serial_println!("PIT: tick {} ({} s)", pit::ticks(), second);
+            // Fairness proof for roadmap 4.4: after a short run the three
+            // turn counts stay within one of each other (shell + two demos).
+            serial_println!(
+                "Scheduler: turns [0]={} [1]={} [2]={}",
+                task::turns(0),
+                task::turns(1),
+                task::turns(2)
+            );
         }
         task::yield_now();
         // SAFETY: waking on the next IRQ is the idle path; the PIT handler
-        // will return here so we can yield to the demo task again.
+        // will return here so we can yield into the ready queue again.
         unsafe { asm!("hlt") };
     }
 }
 
-/// Background cooperative task: prints an increasing counter once a second
-/// over VGA + serial, then yields. Together with [`shell_task`]'s PIT lines
-/// this is the roadmap 4.3 "visibly interleave" proof.
-fn demo_counter_task() -> ! {
+/// Background demo task A: once-a-second counter, then yield.
+fn demo_a_task() -> ! {
+    demo_counter_task(1)
+}
+
+/// Background demo task B: once-a-second counter, then yield.
+fn demo_b_task() -> ! {
+    demo_counter_task(2)
+}
+
+/// Shared body for the two demo tasks. Together with [`shell_task`] this is
+/// the roadmap 4.4 "3+ tasks round-robin fairly" proof: each yield parks at
+/// the ready-queue tail, so the three tasks take equal turns.
+fn demo_counter_task(label: u32) -> ! {
     let mut last_second = 0u32;
     let mut count = 0u32;
     loop {
@@ -384,7 +404,13 @@ fn demo_counter_task() -> ! {
         if second > last_second {
             last_second = second;
             count = count.saturating_add(1);
-            diag_println!("Task: demo counter {}", count);
+            let id = task::current();
+            diag_println!(
+                "Task: demo-{} counter {} (turns {})",
+                label,
+                count,
+                task::turns(id)
+            );
         }
         task::yield_now();
     }

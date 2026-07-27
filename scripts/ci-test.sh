@@ -410,34 +410,71 @@ if ! grep -qE "Shell: line editor \([0-9]+ chars\) \+ builtins \(help/clear/echo
   status=1
 fi
 
-# Cooperative tasks (roadmap 4.3): shell + demo counter with explicit yields.
-if ! grep -qE "Tasks: cooperative switching \([0-9]+ tasks, shell \+ demo counter [0-9]+\)" "$LOG_FILE"; then
-  echo "FAIL: kernel did not report cooperative task switching"
+# Round-robin scheduler (roadmap 4.4): shell + two demo tasks on a FIFO
+# ready queue, still with explicit yields (no preemption yet).
+if ! grep -qE "Tasks: round-robin ready-queue \([0-9]+ tasks, shell \+ demo-a [0-9]+ \+ demo-b [0-9]+\)" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report the round-robin ready-queue scheduler"
   status=1
 fi
 
-# The demo task must actually run (not just be spawned): at least two
-# increasing counter lines, interleaved with the shell's PIT reports.
-mapfile -t demo_counts < <(sed -n 's/^Task: demo counter \([0-9]\+\)$/\1/p' "$LOG_FILE")
-if [ "${#demo_counts[@]}" -lt 2 ]; then
-  echo "FAIL: kernel printed ${#demo_counts[@]} demo counter report(s), expected at least 2"
+# Both demo tasks must actually run: at least two increasing counter lines
+# each, interleaved with the shell's PIT reports.
+for label in 1 2; do
+  mapfile -t demo_counts < <(sed -n "s/^Task: demo-${label} counter \([0-9]\+\) (turns [0-9]\+)$/\1/p" "$LOG_FILE")
+  if [ "${#demo_counts[@]}" -lt 2 ]; then
+    echo "FAIL: kernel printed ${#demo_counts[@]} demo-${label} counter report(s), expected at least 2"
+    status=1
+  else
+    prev="${demo_counts[0]}"
+    for n in "${demo_counts[@]:1}"; do
+      if [ "$n" -le "$prev" ]; then
+        echo "FAIL: demo-${label} counter did not increase ($prev -> $n)"
+        status=1
+        break
+      fi
+      prev="$n"
+    done
+  fi
+done
+
+# Fairness: the last Scheduler turns line should show three task counts
+# within one of each other (equal turns aside from off-by-one at the
+# sampling boundary).
+mapfile -t turn_lines < <(grep -E '^Scheduler: turns \[0\]=[0-9]+ \[1\]=[0-9]+ \[2\]=[0-9]+$' "$LOG_FILE")
+if [ "${#turn_lines[@]}" -lt 1 ]; then
+  echo "FAIL: kernel did not report scheduler turn counts"
   status=1
 else
-  prev="${demo_counts[0]}"
-  for n in "${demo_counts[@]:1}"; do
-    if [ "$n" -le "$prev" ]; then
-      echo "FAIL: demo counter did not increase ($prev -> $n)"
+  last_turns="${turn_lines[-1]}"
+  t0="$(sed -n 's/^Scheduler: turns \[0\]=\([0-9]\+\) \[1\]=\([0-9]\+\) \[2\]=\([0-9]\+\)$/\1/p' <<<"$last_turns")"
+  t1="$(sed -n 's/^Scheduler: turns \[0\]=\([0-9]\+\) \[1\]=\([0-9]\+\) \[2\]=\([0-9]\+\)$/\2/p' <<<"$last_turns")"
+  t2="$(sed -n 's/^Scheduler: turns \[0\]=\([0-9]\+\) \[1\]=\([0-9]\+\) \[2\]=\([0-9]\+\)$/\3/p' <<<"$last_turns")"
+  if [ -z "$t0" ] || [ -z "$t1" ] || [ -z "$t2" ]; then
+    echo "FAIL: could not parse scheduler turn counts from: $last_turns"
+    status=1
+  elif [ "$t0" -lt 2 ] || [ "$t1" -lt 2 ] || [ "$t2" -lt 2 ]; then
+    echo "FAIL: scheduler turn counts too low for a fairness check ($last_turns)"
+    status=1
+  else
+    max="$t0"
+    min="$t0"
+    for t in "$t1" "$t2"; do
+      if [ "$t" -gt "$max" ]; then max="$t"; fi
+      if [ "$t" -lt "$min" ]; then min="$t"; fi
+    done
+    spread=$((max - min))
+    if [ "$spread" -gt 1 ]; then
+      echo "FAIL: round-robin turns not fair (spread $spread): $last_turns"
       status=1
-      break
     fi
-    prev="$n"
-  done
+  fi
 fi
 
-# Proof the two tasks interleaved: a PIT tick and a demo counter line must
-# both appear, and neither stream should be alone at the end of the log.
-if ! grep -q "PIT: tick" "$LOG_FILE" || ! grep -q "Task: demo counter" "$LOG_FILE"; then
-  echo "FAIL: cooperative tasks did not both produce output"
+# Proof all three tasks produced output.
+if ! grep -q "PIT: tick" "$LOG_FILE" \
+  || ! grep -q "Task: demo-1 counter" "$LOG_FILE" \
+  || ! grep -q "Task: demo-2 counter" "$LOG_FILE"; then
+  echo "FAIL: round-robin tasks did not all produce output"
   status=1
 fi
 
