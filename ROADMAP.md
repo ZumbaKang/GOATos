@@ -353,8 +353,8 @@ rather than blocking this one.
       *Done when:* 3+ tasks round-robin fairly (each gets roughly equal
       turns) over a short run.
       *Done as:* `kernel/src/task/` keeps a FIFO ready queue of task ids
-      (the running task is not in it). [`yield_now`] pushes the current task
-      onto the tail and pops the head; [`spawn`] enqueues the new task ready.
+      (the running task is not in it). `yield_now` pushes the current task
+      onto the tail and pops the head; `spawn` enqueues the new task ready.
       Boot spawns shell + two demo counters (3 tasks). Each successful
       switch-in bumps a per-task turn counter; once a second the shell prints
       `Scheduler: turns [0]=N [1]=M [2]=P` and the demos print their own
