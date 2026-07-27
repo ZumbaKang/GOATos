@@ -6,6 +6,13 @@ ENTRY(_start32)
 SECTIONS {
     . = 0x10000;
 
+    /* The physical extent of the loaded kernel, for the frame allocator to
+     * exclude from the memory it hands out. __kernel_end is past .bss, which
+     * is *not* part of the flat binary (objcopy emits nothing for NOBITS) but
+     * is very much part of what the kernel occupies in RAM - the 64KiB stack
+     * from entry.s lives there. */
+    __kernel_start = .;
+
     .text :
     {
         /* _start32 (entry.s) must be the very first thing in the image:
@@ -30,6 +37,8 @@ SECTIONS {
         *(.bss .bss.*)
         *(COMMON)
     }
+
+    __kernel_end = .;
 
     /DISCARD/ :
     {
