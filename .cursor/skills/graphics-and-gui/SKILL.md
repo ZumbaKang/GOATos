@@ -1,26 +1,28 @@
 ---
 name: graphics-and-gui
-description: Guidance for eventually building a graphical UI for GOATos (a pixel-graphics framebuffer, mouse support, and basic windowing) - explicitly a later-stage goal, not a first step. Use this when the user asks for GUI/graphics work, or when starting on a graphics mode framebuffer driver.
+description: Guidance for GOATos graphics (Mode 13h is on; pixel primitives, bitmap font, mouse, and windowing are next). Use this when working on framebuffer/GUI code or changing the boot-time video mode.
 ---
 
-# Graphics and GUI (future work, not a first step)
+# Graphics and GUI
 
-GOATos currently only has VGA **text mode** (`kernel/src/vga.rs`, the
-80x25 character buffer at `0xB8000`) - which is exactly what makes it
-"displayable" in both real BIOS/QEMU and the browser-based v86 demo (see
-`web-demo-packaging`) with almost no code. A graphical UI is a deliberately
-later milestone built on top of that same "just write to a buffer that the
-BIOS/emulator already renders for you" idea, one level up.
+GOATos boots into VGA **Mode 13h** (320×200, 256-color, framebuffer at
+`0xA0000`): `boot/boot.asm` sets it via BIOS `INT 10h` before the
+protected-mode switch, and `kernel/src/graphics.rs` fills it solid as the
+first thing `kernel_main` does (roadmap 5.1). The old text-mode driver
+(`kernel/src/vga.rs`, `0xB8000`) still runs for serial-mirrored banners and
+the shell, but the hardware (and v86 canvas) no longer shows it - that is
+intentional until a bitmap font (5.3) restores on-screen text.
 
-## Suggested order of implementation
+## What is already in place (roadmap 5.1)
 
-1. **Switch to a VGA graphics mode** (or VESA/VBE for higher resolutions
-   and more colors) instead of text mode, via BIOS video mode-setting calls
-   made from `boot/boot.asm` before the protected-mode switch (BIOS video
-   services are real-mode/BIOS-call-based, so this has to happen while
-   still in real mode - the kernel itself has no way to call the BIOS
-   after the jump to protected mode, matching how `entry.s`/`kernel_main`
-   currently have no BIOS access either).
+- Mode set in `boot/boot.asm` (`mov ax, 0x0013` / `int 0x10`) - five bytes;
+  the GDT `align 8` slack absorbs them so the 512-byte sector still fits.
+- `kernel/src/graphics.rs` - `fill_solid` + a serial banner naming mode,
+  resolution, framebuffer address, and fill color.
+
+## Suggested order from here
+
+1. ~~**Switch to a VGA graphics mode.**~~ Done (5.1): Mode 13h + solid fill.
 2. **A pixel/framebuffer drawing module** (`kernel/src/framebuffer.rs` or
    similar): basic primitives first - set-pixel, fill-rect, blit - then a
    simple bitmap font renderer for text, since VGA text mode's built-in
@@ -44,8 +46,7 @@ BIOS/emulator already renders for you" idea, one level up.
   test any new video mode there too, not just in QEMU (see
   `web-demo-packaging`, especially the "boots in QEMU but not in v86"
   debugging process, since video mode support is a plausible place for the
-  two to diverge).
-- This is explicitly a "later" milestone per the project's own roadmap
-  (see the repo README) - don't start it before more foundational pieces
-  (`memory-management`, `interrupts-and-exceptions`) are in place, since
-  graphics/mouse work leans on both.
+  two to diverge). Mode 13h is the conservative choice for that reason.
+- Do not grow `boot/boot.asm` casually - it is still on a 512-byte budget
+  (see `bootloader-and-linking`). Higher modes (VBE) likely need a
+  second-stage loader or a real-mode helper stub, not more MBR bytes.

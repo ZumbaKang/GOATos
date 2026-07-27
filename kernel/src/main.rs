@@ -29,6 +29,7 @@ use core::panic::PanicInfo;
 
 pub mod exceptions;
 pub mod gdt;
+pub mod graphics;
 pub mod idt;
 pub mod input;
 pub mod interrupts;
@@ -47,22 +48,28 @@ global_asm!(include_str!("entry.s"), options(att_syntax));
 
 #[no_mangle]
 pub extern "C" fn kernel_main() -> ! {
-    // VGA is the primary, load-bearing output surface (it's what makes
-    // GOATos "displayable" both on real hardware and via v86 in a browser),
-    // so it comes first and never depends on the serial port succeeding.
+    // Graphics mode is the primary, load-bearing display surface now: the
+    // bootloader already switched to VGA Mode 13h (see `boot/boot.asm`), so
+    // paint a solid known color before anything else. A botched mode-set
+    // shows up as "not this color" on a screendump; serial still carries the
+    // textual proof for headless CI.
+    let graphics = graphics::init();
+
+    // The text-mode buffer at 0xb8000 is no longer what the hardware shows,
+    // but keep writing it for now: serial is what CI reads, and later GUI
+    // tasks (bitmap font, etc.) will replace this path deliberately.
     vga::clear_screen();
     vga_println!("GOATos");
     vga_println!("------");
     vga_println!("Booted successfully via a from-scratch bootloader.");
-    vga_println!("This screen is the same VGA text buffer real BIOS");
-    vga_println!("hardware (and browser emulators like v86) render -");
-    vga_println!("what you see here is what a web visitor would see.");
+    vga_println!("{}", graphics);
 
     // Serial output is best-effort: useful for headless QEMU/CI, but its
     // absence must never affect anything above. It comes up before the
     // subsystems below so that a fault in any of them still has a headless
     // surface to report itself on (see `exceptions`).
     serial::init();
+    serial_println!("{}", graphics);
 
     // Take over segmentation from the bootloader's throwaway GDT. Printing
     // first means a botched GDT load shows up as "the banner is on screen but
