@@ -310,11 +310,18 @@ is *not* required for a first shell - `help`/`echo`/`clear`-style built-ins
 don't need one - so it's tracked as its own optional phase (4.5 below)
 rather than blocking this one.
 
-- [ ] **4.1 - Line editor.** Build a simple input line buffer on top of the
+- [x] **4.1 - Line editor.** Build a simple input line buffer on top of the
       Phase 3 keyboard queue: typed characters append to a line, backspace
       removes the last one, enter submits it.
       *Done when:* you can type a line, backspace to fix a typo, and press
       enter to see the whole line echoed back.
+      *Done as:* `kernel/src/shell.rs` holds a 72-byte line buffer. The idle
+      loop drains the Phase 3 input queue into it: printable characters append
+      and echo, backspace pops and erases (VGA + serial `\x08 \x08`), and
+      enter submits - printing the whole line back, clearing the buffer, and
+      showing a fresh `> ` prompt. Verified with QEMU monitor `sendkey`
+      (typo + backspace + enter yields the corrected line on the VGA
+      screendump and in the serial log) and against the v86 web demo.
 - [ ] **4.2 - Built-in commands.** A small command dispatcher with a
       handful of built-ins: `help` (list commands), `clear` (clear the VGA
       screen), `echo <text>`, `about` (prints the GOATos banner/version).

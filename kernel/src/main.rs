@@ -37,6 +37,7 @@ pub mod memory;
 pub mod pic;
 pub mod pit;
 pub mod serial;
+pub mod shell;
 pub mod sync;
 pub mod tss;
 pub mod vga;
@@ -298,7 +299,7 @@ pub extern "C" fn kernel_main() -> ! {
     );
 
     // Second real IRQ line: PS/2 keyboard on IRQ1. The handler only enqueues
-    // translated keys; the idle loop below drains and echoes them.
+    // translated keys; the idle loop below drains them into the line editor.
     keyboard::init();
     let pic = pic::state();
     diag_println!(
@@ -312,8 +313,17 @@ pub extern "C" fn kernel_main() -> ! {
         input::CAPACITY
     );
 
-    // Idle: sleep until the next IRQ, drain any typed keys into an echo, and
-    // once a second prove the tick counter is actually advancing.
+    // Line editor on top of that queue: type, backspace, enter to submit and
+    // see the whole line echoed back (roadmap 4.1). Banner first so the
+    // prompt is the last thing on screen, ready for typing.
+    diag_println!(
+        "Shell: line editor ({} chars, type/backspace/enter to echo)",
+        shell::LINE_CAPACITY
+    );
+    shell::init();
+
+    // Idle: sleep until the next IRQ, feed typed keys into the line editor,
+    // and once a second prove the tick counter is actually advancing.
     idle_with_input();
 }
 
@@ -326,47 +336,22 @@ pub fn hlt_loop() -> ! {
 }
 
 /// Idles like [`hlt_loop`], but wakes on each IRQ to:
-/// - drain the keyboard input queue and echo each event (roadmap 3.3),
+/// - drain the keyboard input queue into the line editor (roadmap 4.1),
 /// - report the PIT tick counter once per second (roadmap 3.1).
 fn idle_with_input() -> ! {
+    let mut editor = shell::LineEditor::new();
     let mut last_second = 0u32;
     loop {
-        drain_input_queue();
+        shell::drain_input(&mut editor);
 
         let second = pit::seconds();
         if second > last_second {
             last_second = second;
             // Serial only: CI greps this line, and printing it on VGA would
-            // land mid-echo whenever a second boundary falls between keystrokes.
+            // land mid-edit whenever a second boundary falls between keystrokes.
             serial_println!("PIT: tick {} ({} s)", pit::ticks(), second);
         }
         unsafe { asm!("hlt") };
-    }
-}
-
-/// Pops every pending [`input::KeyEvent`] and echoes it to VGA + serial.
-///
-/// This is the consumer half of roadmap 3.3: the IRQ handler only enqueues,
-/// so typing never races a print that was already in progress, and the shell
-/// (roadmap 4.x) can later replace this echo with a line editor.
-fn drain_input_queue() {
-    while let Some(event) = input::pop() {
-        match event {
-            input::KeyEvent::Char(c) => {
-                vga_print!("{}", c);
-                serial_print!("{}", c);
-            }
-            input::KeyEvent::Enter => {
-                vga_println!();
-                serial_println!();
-            }
-            input::KeyEvent::Backspace => {
-                vga::backspace();
-                // Erase the previous character on a serial terminal that
-                // understands the usual backspace-space-backspace sequence.
-                serial_print!("\x08 \x08");
-            }
-        }
     }
 }
 
