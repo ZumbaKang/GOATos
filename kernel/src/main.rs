@@ -31,6 +31,7 @@ pub mod exceptions;
 pub mod gdt;
 pub mod idt;
 pub mod interrupts;
+pub mod keyboard;
 pub mod memory;
 pub mod pic;
 pub mod pit;
@@ -295,8 +296,21 @@ pub extern "C" fn kernel_main() -> ! {
         pic.slave_mask
     );
 
+    // Second real IRQ line: PS/2 keyboard on IRQ1. Typing echoes straight to
+    // VGA (and serial) from the handler - proof the translate path works
+    // before roadmap 3.3 introduces a proper input queue.
+    keyboard::init();
+    let pic = pic::state();
+    diag_println!(
+        "Keyboard: PS/2 on IRQ1 -> vector {}, IMR {:#04x}/{:#04x} (type to echo)",
+        keyboard::VECTOR,
+        pic.master_mask,
+        pic.slave_mask
+    );
+
     // Idle: sleep until the next IRQ, and once a second prove the tick
     // counter is actually advancing (the "Done when" for roadmap 3.1).
+    // Keyboard echoes arrive from IRQ1 on their own and do not need the loop.
     idle_with_timer();
 }
 
