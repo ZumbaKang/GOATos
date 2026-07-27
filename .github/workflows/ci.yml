@@ -95,6 +95,34 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Bugbot's GitHub check defaults to a `neutral` conclusion when it
+      # finds issues (not `failure`), so just requiring the check via branch
+      # protection would not actually block anything - this waits for it
+      # directly and treats non-`success` as blocking. Fails *open* (lets
+      # the merge proceed) if Bugbot never posts a check at all, i.e. it
+      # isn't enabled for this repo - see scripts/wait-for-bugbot.sh and
+      # .cursor/skills/bugbot-and-code-review/SKILL.md.
+      - name: Wait for Bugbot and respect its findings
+        id: bugbot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: ./scripts/wait-for-bugbot.sh
+
+      - name: Comment if blocked by Bugbot
+        if: failure() && steps.bugbot.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
+            "Auto-merge did not proceed: the \`Cursor Bugbot\` check reported unresolved findings (or timed out waiting for it). Please review Bugbot's comments on this PR. Once they're resolved - manually, or automatically via Bugbot's [Autofix](https://cursor.com/dashboard/bugbot) - and a new commit is pushed, this workflow re-runs and merges automatically if everything passes."
+
       # Draft status is still an absolute "do not merge", but it has to be
       # re-read here rather than taken from the event payload: that payload
       # predates the `ready-for-review` job. A PR that is somehow still a

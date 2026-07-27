@@ -92,11 +92,18 @@ right but the VGA output is garbled," for example.
   it - say so in your final message rather than trying to work around it.
 
 From here, `.github/workflows/ci.yml` takes over: it takes the PR out of
-draft, builds the kernel, runs `cargo clippy`, runs the boot test, and -
-only for `cursor/*` branches in this repository, and only if all of that
-passes - merges the PR automatically (squash + delete branch). If CI fails,
-the PR is left open for the next run (or a human) to fix; **never bypass a
-failing check to force a merge.**
+draft, builds the kernel, runs `cargo clippy`, runs the boot test, waits
+for and respects the `Cursor Bugbot` check if Bugbot is enabled for this
+repo (see `.cursor/skills/bugbot-and-code-review/SKILL.md`), and - only for
+`cursor/*` branches in this repository, and only if all of that passes -
+merges the PR automatically (squash + delete branch). If CI fails, or
+Bugbot flags something, the PR is left open for the next run (or a human)
+to fix; **never bypass a failing check to force a merge.** If you're
+resumed on a PR that's blocked specifically by a Bugbot finding (its
+comment on the PR will say so), follow
+`.cursor/skills/bugbot-and-code-review/SKILL.md` rather than this
+procedure - fix exactly what Bugbot flagged, nothing else, and push to the
+same branch.
 
 ## Setting up the Automation itself
 
