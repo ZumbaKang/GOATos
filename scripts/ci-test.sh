@@ -355,7 +355,38 @@ else
   fi
 fi
 
+# PIT (IRQ0): programmed, handler installed, line unmasked. The banner's IMR
+# must show IRQ0 clear on the master (0xfe) with the slave still fully masked.
+if ! grep -q "PIT: channel 0 at 100 Hz" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report programming the PIT"
+  status=1
+fi
+
+if ! grep -qE "PIT: channel 0 at 100 Hz \(IRQ0 -> vector 32, divisor [0-9]+\), IMR 0xfe/0xff" "$LOG_FILE"; then
+  echo "FAIL: PIT banner missing IRQ0 vector/IMR (timer IRQ not actually unmasked)"
+  status=1
+fi
+
+# Once-a-second tick reports from the idle loop - the proof IRQ0 is firing.
+# Need at least two, strictly increasing, or the counter is stuck / not running.
+mapfile -t pit_ticks < <(sed -n 's/^PIT: tick \([0-9]\+\) ([0-9]\+ s)$/\1/p' "$LOG_FILE")
+if [ "${#pit_ticks[@]}" -lt 2 ]; then
+  echo "FAIL: kernel printed ${#pit_ticks[@]} PIT tick report(s), expected at least 2"
+  status=1
+else
+  prev="${pit_ticks[0]}"
+  for tick in "${pit_ticks[@]:1}"; do
+    if [ "$tick" -le "$prev" ]; then
+      echo "FAIL: PIT tick counter did not increase ($prev -> $tick)"
+      status=1
+      break
+    fi
+    prev="$tick"
+  done
+fi
+
 # A stray interrupt on a vector nothing owns, once interrupts are on.
+# (IRQ0 has a real handler now, so timer ticks must not land here.)
 if grep -q "UNHANDLED INTERRUPT" "$LOG_FILE"; then
   echo "FAIL: kernel took an interrupt it had no handler for"
   status=1
