@@ -1,21 +1,19 @@
-//! Where the kernel's stacks and heap live, written down so they cannot
-//! silently collide as either side grows.
+//! Where the kernel's stacks, stack guard page, and heap live, written down
+//! so they cannot silently collide as either side grows.
 //!
 //! ## Address map (identity-mapped: virtual == physical)
 //!
 //! ```text
 //! [__kernel_start, __kernel_end)   whole loaded image, reserved from the
 //!                                  frame allocator. Contains .text /
-//!                                  .rodata / .data / .bss. Both stacks
-//!                                  live in .bss:
+//!                                  .rodata / .data / .bss. The stacks and
+//!                                  guard live in .bss, laid out by entry.s:
 //!
-//!   DOUBLE_FAULT_STACK             4 KiB  (tss.rs). The linker is free to
-//!                                          place this immediately below
-//!                                          the kernel stack - see 2.6.
-//!   [stack_bottom, stack_top)      64 KiB (entry.s). Grows down from
-//!                                          stack_top; this is what
-//!                                          kernel_main and every ordinary
-//!                                          interrupt handler run on.
+//!   [df_stack_bottom, df_stack_top)  4 KiB  double-fault handler stack
+//!   [stack_guard,     stack_bottom)  4 KiB  unmapped (paging leaves PTE
+//!                                           not-present)
+//!   [stack_bottom,    stack_top)    64 KiB  ordinary kernel stack; grows
+//!                                           down from stack_top
 //!
 //! [heap_start, heap_end)           1 MiB contiguous frames from
 //!                                  frame::allocate_contiguous, always
@@ -24,34 +22,40 @@
 //!
 //! The stacks cannot grow into the heap by construction: the frame allocator
 //! never hands out a frame inside `__kernel_start..__kernel_end`, and the heap
-//! only comes from those handed-out frames. This module records the ranges at
-//! boot and refuses to continue quietly if that invariant is broken - a future
-//! change that moves either side (or that starts handing the heap a fixed
-//! link-time address inside the image) gets a loud failure instead of silent
-//! corruption.
+//! only comes from those handed-out frames. A kernel-stack overflow cannot
+//! reach the double-fault stack either: the unmapped guard page between them
+//! makes the access fault (and escalate to a double fault on the private
+//! stack) instead of scribbling through.
 //!
-//! Task 2.6 adds an unmapped guard page below the kernel stack so an overflow
-//! faults instead of scribbling into neighbouring `.bss` (including the
-//! double-fault stack).
+//! This module records the ranges at boot and refuses to continue quietly if
+//! that invariant is broken - a future change that moves either side, drops
+//! the guard, or remaps the guard page gets a loud failure instead of silent
+//! corruption.
 
 use core::fmt;
 
 use crate::tss;
 
 use super::heap;
+use super::paging;
 
 /// Bytes reserved for the ordinary kernel stack in `entry.s`. Must match the
 /// `.skip` there; [`check`] verifies the linker symbols agree at boot.
 pub const KERNEL_STACK_SIZE: usize = 64 * 1024;
 
-/// Bytes reserved for the double-fault handler's private stack in `tss.rs`.
+/// Bytes reserved for the double-fault handler's private stack in `entry.s`.
 /// Named here so the layout report can print it without opening that module's
 /// internals; [`check`] verifies the live range matches.
 pub const DOUBLE_FAULT_STACK_SIZE: usize = 4096;
 
+/// Bytes left unmapped immediately below the kernel stack. One page - enough
+/// that any access from an overflowing `esp` hits a not-present PTE.
+pub const GUARD_PAGE_SIZE: usize = 4096;
+
 extern "C" {
     static stack_bottom: u8;
     static stack_top: u8;
+    static stack_guard_page: u8;
     static __kernel_start: u8;
     static __kernel_end: u8;
 }
@@ -101,6 +105,7 @@ pub struct Report {
     pub kernel_image: Range,
     pub kernel_stack: Range,
     pub double_fault_stack: Range,
+    pub guard_page: Range,
     pub heap: Range,
     failure: Option<&'static str>,
 }
@@ -123,18 +128,20 @@ impl fmt::Display for Report {
         }
         write!(
             f,
-            "Layout: kernel stack {} ({} KiB), DF stack {} ({} KiB), heap {} ({} KiB) - disjoint",
-            self.kernel_stack,
-            self.kernel_stack.len() / 1024,
+            "Layout: DF stack {} ({} KiB), guard {} ({} KiB, unmapped), kernel stack {} ({} KiB), heap {} ({} KiB) - ok",
             self.double_fault_stack,
             self.double_fault_stack.len() / 1024,
+            self.guard_page,
+            self.guard_page.len() / 1024,
+            self.kernel_stack,
+            self.kernel_stack.len() / 1024,
             self.heap,
             self.heap.len() / 1024
         )
     }
 }
 
-/// Reads the live stack/heap/image ranges and checks the invariants this
+/// Reads the live stack/guard/heap/image ranges and checks the invariants this
 /// module documents. Cheap enough to run on every boot; the printed report is
 /// what keeps the layout from living only in someone's head.
 pub fn check(heap: heap::Report) -> Report {
@@ -149,6 +156,8 @@ pub fn check(heap: heap::Report) -> Report {
         core::ptr::addr_of!(stack_bottom) as usize,
         core::ptr::addr_of!(stack_top) as usize,
     );
+    let guard_start = core::ptr::addr_of!(stack_guard_page) as usize;
+    let guard_page = Range::new(guard_start, guard_start + GUARD_PAGE_SIZE);
     let (df_bottom, df_top) = tss::double_fault_stack_range();
     let double_fault_stack = Range::new(df_bottom as usize, df_top as usize);
     let heap_range = if heap.ready() {
@@ -161,6 +170,7 @@ pub fn check(heap: heap::Report) -> Report {
         kernel_image,
         kernel_stack,
         double_fault_stack,
+        guard_page,
         heap: heap_range,
         failure: None,
     };
@@ -173,6 +183,10 @@ pub fn check(heap: heap::Report) -> Report {
         report.failure = Some("double-fault stack size does not match DOUBLE_FAULT_STACK_SIZE");
         return report;
     }
+    if guard_page.len() != GUARD_PAGE_SIZE {
+        report.failure = Some("guard page size does not match GUARD_PAGE_SIZE");
+        return report;
+    }
     if !kernel_image.contains_range(kernel_stack) {
         report.failure = Some("kernel stack is outside the kernel image");
         return report;
@@ -181,8 +195,31 @@ pub fn check(heap: heap::Report) -> Report {
         report.failure = Some("double-fault stack is outside the kernel image");
         return report;
     }
+    if !kernel_image.contains_range(guard_page) {
+        report.failure = Some("guard page is outside the kernel image");
+        return report;
+    }
+    // entry.s lays them out as DF stack | guard | kernel stack. Anything else
+    // means the assembly layout drifted from what paging leaves unmapped.
+    if double_fault_stack.end != guard_page.start {
+        report.failure = Some("double-fault stack is not immediately below the guard page");
+        return report;
+    }
+    if guard_page.end != kernel_stack.start {
+        report.failure = Some("guard page is not immediately below the kernel stack");
+        return report;
+    }
     if kernel_stack.overlaps(double_fault_stack) {
         report.failure = Some("kernel stack and double-fault stack overlap");
+        return report;
+    }
+    if kernel_stack.overlaps(guard_page) || double_fault_stack.overlaps(guard_page) {
+        report.failure = Some("guard page overlaps a stack");
+        return report;
+    }
+    // The whole point of the guard: the PTE must stay not-present.
+    if paging::is_present(guard_page.start as u32) {
+        report.failure = Some("stack guard page is still mapped");
         return report;
     }
     if !heap.ready() {
@@ -204,6 +241,10 @@ pub fn check(heap: heap::Report) -> Report {
     }
     if double_fault_stack.overlaps(heap_range) {
         report.failure = Some("double-fault stack and heap overlap");
+        return report;
+    }
+    if guard_page.overlaps(heap_range) {
+        report.failure = Some("guard page and heap overlap");
         return report;
     }
 

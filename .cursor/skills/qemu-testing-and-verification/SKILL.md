@@ -58,8 +58,8 @@ it can't be tested:
 - **Segment limits are not enforced** by QEMU's TCG emulation. Verified
   directly: a write through a deliberately bounded expand-down data segment,
   well outside its limit, silently succeeded instead of raising #GP. So
-  segmentation cannot be used to bound the kernel stack (a guard page, once
-  paging exists, is the only option - see `ROADMAP.md` 2.6).
+  segmentation cannot be used to bound the kernel stack - the unmapped
+  guard page below it (roadmap 2.6, now in place) is what catches overflows.
 - v86 has its own, different gaps - notably no double-fault escalation. See
   `web-demo-packaging` for the list, and check the browser console before
   blaming the kernel.

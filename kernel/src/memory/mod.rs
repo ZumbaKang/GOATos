@@ -21,8 +21,9 @@
 //! `#[global_allocator]`, so `alloc` (`Vec`, `Box`, `String`) works.
 //!
 //! [`layout`] is the written-down map of those pieces against the kernel
-//! stacks: ranges recorded at boot, with a disjointness check so a future
-//! change cannot silently put the heap on top of a stack (or vice versa).
+//! stacks and the unmapped guard page between them: ranges recorded at boot,
+//! with a disjointness/adjacency check so a future change cannot silently put
+//! the heap on top of a stack (or remap the guard).
 
 pub mod frame;
 pub mod heap;

@@ -24,14 +24,31 @@ _start32:
     hlt
     jmp .Lhang
 
-/* 64 KiB kernel stack in .bss. Grows down from stack_top. Exported so
- * memory::layout can name the range next to the heap and refuse to boot
- * quietly if the two ever overlap (roadmap 2.5). Keep the size in step with
- * KERNEL_STACK_SIZE in kernel/src/memory/layout.rs. */
+/* Stacks and the guard page that separates them, all page-aligned so the
+ * identity map can leave exactly one 4 KiB PTE not-present.
+ *
+ * Layout (low -> high):
+ *   [double_fault_stack_bottom, double_fault_stack_top)  4 KiB  DF handler
+ *   [stack_guard_page,          stack_bottom)            4 KiB  unmapped
+ *   [stack_bottom,              stack_top)              64 KiB  kernel
+ *
+ * The kernel stack grows down from stack_top; overflowing it hits the
+ * unmapped guard and faults instead of scribbling into the DF stack (or
+ * anything else that happens to sit below). Keep the sizes in step with
+ * DOUBLE_FAULT_STACK_SIZE / GUARD_PAGE_SIZE / KERNEL_STACK_SIZE in
+ * kernel/src/memory/layout.rs. */
 .section .bss
-.align 16
+.align 4096
+.global double_fault_stack_bottom
+.global double_fault_stack_top
+.global stack_guard_page
 .global stack_bottom
 .global stack_top
+double_fault_stack_bottom:
+    .skip 4096 /* 4 KiB = DOUBLE_FAULT_STACK_SIZE */
+double_fault_stack_top:
+stack_guard_page:
+    .skip 4096 /* 4 KiB = GUARD_PAGE_SIZE; left unmapped by paging::init */
 stack_bottom:
     .skip 65536 /* 64 KiB = KERNEL_STACK_SIZE */
 stack_top:

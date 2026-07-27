@@ -18,7 +18,10 @@ and a "hello world" on screen.
       double fault on a stack of its own, via a TSS and task gate), both 8259
       PICs remapped clear of the exception vectors, and interrupts enabled with
       a catch-all for any vector nothing owns yet.
-- [ ] Physical & virtual memory management (paging, a heap allocator)
+- [x] **Physical & virtual memory management**: BIOS E820 memory map, a
+      physical frame allocator, identity-mapped paging, a kernel heap with
+      `#[global_allocator]`/`alloc`, and an unmapped guard page below the
+      kernel stack so overflow double-faults instead of corrupting memory.
 - [ ] Keyboard input
 - [ ] A minimal shell
 - [ ] Graphics mode + a basic GUI
