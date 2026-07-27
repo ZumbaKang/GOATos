@@ -50,6 +50,10 @@ const SCAN_ENTER: u8 = 0x1c;
 const SCAN_BACKSPACE: u8 = 0x0e;
 /// Space bar.
 const SCAN_SPACE: u8 = 0x39;
+/// Period / greater-than (unshifted `.`).
+const SCAN_DOT: u8 = 0x34;
+/// Minus / underscore.
+const SCAN_MINUS: u8 = 0x0c;
 
 /// Set while the next scancode is the second byte of an `0xe0` sequence.
 static EXTENDED: AtomicBool = AtomicBool::new(false);
@@ -150,8 +154,10 @@ fn translate(make: u8) -> Option<KeyEvent> {
         SCAN_ENTER => KeyEvent::Enter,
         SCAN_BACKSPACE => KeyEvent::Backspace,
         SCAN_SPACE => KeyEvent::Char(' '),
-        // Digits, top row (unshifted forms only - shifted symbols are out of
-        // scope for the basic layout).
+        SCAN_DOT => KeyEvent::Char('.'),
+        SCAN_MINUS => KeyEvent::Char(if shift { '_' } else { '-' }),
+        // Digits, top row (unshifted forms only - other shifted symbols stay
+        // out of scope for the basic layout).
         0x02 => KeyEvent::Char('1'),
         0x03 => KeyEvent::Char('2'),
         0x04 => KeyEvent::Char('3'),

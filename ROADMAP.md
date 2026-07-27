@@ -373,8 +373,10 @@ rather than blocking this one.
       it and the Makefile `dd`s it into `build/disk.img`. Boot mounts the
       FS, self-tests by reading `hello.txt`, and echoes
       `GOATos says hello from disk!`; the shell gains a `cat <file>` built-in
-      that does the same. `scripts/ci-test.sh` greps the ATA/FS banners, the
-      self-test verdict, and the exact file contents.
+      that does the same. The keyboard layout also gained `.`/`-`/`_` so
+      filenames with extensions are typeable. `scripts/ci-test.sh` greps the
+      ATA/FS banners, the self-test verdict, and the exact file contents;
+      verified under QEMU (boot + `sendkey` `cat hello.txt`) and v86.
 
 ---
 
