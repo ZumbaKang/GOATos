@@ -33,6 +33,7 @@ pub mod idt;
 pub mod interrupts;
 pub mod memory;
 pub mod pic;
+pub mod pit;
 pub mod serial;
 pub mod sync;
 pub mod tss;
@@ -273,22 +274,52 @@ pub extern "C" fn kernel_main() -> ! {
 
     // Compile to nothing unless a `trigger-*` feature is enabled, which is how
     // the handlers / print path above get verified against a real exception, a
-    // real unexpected interrupt, or a real mid-print re-entry.
+    // real unexpected interrupt, or a real mid-print re-entry. Runs *before*
+    // the PIT unmasks IRQ0, so a timer tick cannot interleave with a deliberate
+    // fault/re-entry probe.
     exceptions::trigger_debug_exception();
     interrupts::trigger_debug_interrupt();
     interrupts::trigger_print_reentrancy();
 
-    // With every IRQ line masked there is nothing left to wake the CPU, so this
-    // is where the kernel stays: idle in `hlt`, ready to report anything that
-    // arrives anyway.
-    hlt_loop();
+    // First real IRQ line: program the PIT, replace the catch-all on its
+    // vector, and unmask IRQ0. The masks reported just above were still
+    // 0xff/0xff; this is what changes that.
+    pit::init();
+    let pic = pic::state();
+    diag_println!(
+        "PIT: channel 0 at {} Hz (IRQ0 -> vector {}, divisor {}), IMR {:#04x}/{:#04x}",
+        pit::FREQUENCY_HZ,
+        pit::VECTOR,
+        pit::DIVISOR,
+        pic.master_mask,
+        pic.slave_mask
+    );
+
+    // Idle: sleep until the next IRQ, and once a second prove the tick
+    // counter is actually advancing (the "Done when" for roadmap 3.1).
+    idle_with_timer();
 }
 
-/// Parks the CPU for good, waking only to halt again. Used both for a normal
-/// end of `kernel_main` and by an exception handler that has finished
-/// reporting.
+/// Parks the CPU for good, waking only to halt again. Used by an exception
+/// handler that has finished reporting (and by any path that must stop cold).
 pub fn hlt_loop() -> ! {
     loop {
+        unsafe { asm!("hlt") };
+    }
+}
+
+/// Idles like [`hlt_loop`], but wakes on each timer tick and reports the
+/// counter once per second over serial - proof that IRQ0 is firing.
+fn idle_with_timer() -> ! {
+    let mut last_second = 0u32;
+    loop {
+        let second = pit::seconds();
+        if second > last_second {
+            last_second = second;
+            // Serial is what CI greps; VGA gets the same line so a screendump
+            // (or the web demo) shows the counter moving too.
+            diag_println!("PIT: tick {} ({} s)", pit::ticks(), second);
+        }
         unsafe { asm!("hlt") };
     }
 }

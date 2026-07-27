@@ -258,10 +258,16 @@ Needs Phase 1 (interrupts) done first.
       `KERNEL_FEATURES=trigger-print-reentrancy` holds both locks and fires
       `int $0x60`; the catch-all's report lands and the kernel prints
       `print reentrancy ok` afterwards.
-- [ ] **3.1 - PIT (timer) driver.** Program the 8253/8254 PIT to a fixed
+- [x] **3.1 - PIT (timer) driver.** Program the 8253/8254 PIT to a fixed
       frequency, add an IRQ0 handler that increments a tick counter.
       *Done when:* the kernel can print an increasing tick count (e.g.
       once a second) over serial, proving interrupts are actually firing.
+      *Done as:* `kernel/src/pit.rs` programs channel 0 for 100 Hz (mode 3),
+      installs an IRQ0 handler that bumps an `AtomicU32` and EOIs, and
+      `pic::unmask(0)` lets the line through. The idle loop wakes on each tick
+      and prints `PIT: tick N (S s)` once a second over VGA + serial;
+      `scripts/ci-test.sh` checks the banner and that at least two successive
+      reports show a strictly increasing counter.
 - [ ] **3.2 - PS/2 keyboard driver.** Add an IRQ1 handler that reads
       scancodes from the keyboard controller and translates a basic US
       layout (letters, digits, space, enter, backspace) to ASCII.

@@ -304,6 +304,38 @@ pub fn state() -> State {
     }
 }
 
+/// Clears the mask bit for `irq` (0-15), so that line can raise its vector.
+///
+/// For a slave IRQ (8-15) the master's cascade line (IRQ2) is also unmasked -
+/// otherwise the slave can never get the master's attention.
+///
+/// The caller must have registered a handler for the corresponding vector
+/// (`IRQ_VECTOR_BASE + irq`) first. Unmasking a line with only the catch-all
+/// behind it is survivable but pointless; unmasking with nothing present is
+/// how a timer tick becomes a double fault.
+pub fn unmask(irq: u8) {
+    if irq >= IRQ_COUNT {
+        return;
+    }
+
+    let pics = PICS.lock();
+    // SAFETY: interrupts may already be on, but the mask register is a single
+    // byte and we hold `PICS`, so no other code is mid-update. Clearing a bit
+    // here is exactly the contract above - the caller registered a handler.
+    unsafe {
+        if irq < 8 {
+            let mask = pics.master.mask() & !(1 << irq);
+            pics.master.set_mask(mask);
+        } else {
+            let mask = pics.slave.mask() & !(1 << (irq - 8));
+            pics.slave.set_mask(mask);
+            // Cascade on IRQ2: without it the master never forwards the slave.
+            let master = pics.master.mask() & !(1 << 2);
+            pics.master.set_mask(master);
+        }
+    }
+}
+
 /// Writes `value` to I/O port `port`.
 ///
 /// # Safety

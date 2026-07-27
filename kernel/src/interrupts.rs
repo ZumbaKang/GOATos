@@ -18,10 +18,10 @@
 //! unhandled CPU exception, which would otherwise re-execute the faulting
 //! instruction and fault again forever).
 //!
-//! Nothing should actually arrive yet: the PIC's masks are all set, so no IRQ
-//! can get through until the driver that owns one clears its bit. The
-//! catch-all is what makes that safe to get wrong - an unmasked line with no
-//! driver behind it prints a diagnostic instead of taking the machine down.
+//! Until a driver unmasks its line (the PIT is the first - see [`crate::pit`]),
+//! the PIC's masks keep every IRQ out. The catch-all is what makes a mistaken
+//! unmask survivable: an unmasked line with no driver behind it prints a
+//! diagnostic instead of taking the machine down.
 //!
 //! Reporting is safe even if an interrupt arrives mid-print: the VGA and serial
 //! writers use [`crate::sync::IrqMutex`], which masks IRQs while the lock is
