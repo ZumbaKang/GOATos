@@ -1,32 +1,36 @@
 ---
 name: graphics-and-gui
-description: Guidance for GOATos graphics (Mode 13h is on; pixel primitives, bitmap font, mouse, and windowing are next). Use this when working on framebuffer/GUI code or changing the boot-time video mode.
+description: Guidance for GOATos graphics (Mode 13h + pixel primitives are on; bitmap font, mouse, and windowing are next). Use this when working on framebuffer/GUI code or changing the boot-time video mode.
 ---
 
 # Graphics and GUI
 
 GOATos boots into VGA **Mode 13h** (320×200, 256-color, framebuffer at
 `0xA0000`): `boot/boot.asm` sets it via BIOS `INT 10h` before the
-protected-mode switch, and `kernel/src/graphics.rs` fills it solid as the
-first thing `kernel_main` does (roadmap 5.1). The old text-mode driver
+protected-mode switch, and `kernel/src/graphics.rs` paints a colored
+rectangle test pattern via `kernel/src/framebuffer.rs` as the first thing
+`kernel_main` does (roadmap 5.1 / 5.2). The old text-mode driver
 (`kernel/src/vga.rs`, `0xB8000`) still runs for serial-mirrored banners and
 the shell, but the hardware (and v86 canvas) no longer shows it - that is
 intentional until a bitmap font (5.3) restores on-screen text.
 
-## What is already in place (roadmap 5.1)
+## What is already in place (roadmap 5.1 / 5.2)
 
 - Mode set in `boot/boot.asm` (`mov ax, 0x0013` / `int 0x10`) - five bytes;
   the GDT `align 8` slack absorbs them so the 512-byte sector still fits.
-- `kernel/src/graphics.rs` - `fill_solid` + a serial banner naming mode,
-  resolution, framebuffer address, and fill color.
+- `kernel/src/graphics.rs` - mode constants + boot init that draws the
+  test pattern and reports mode / resolution / framebuffer address.
+- `kernel/src/framebuffer.rs` - `set_pixel`, `fill_rect`, `draw_line`
+  (Bresenham), plus `draw_test_pattern` (black bg, four colored rects,
+  white diagonal).
 
 ## Suggested order from here
 
 1. ~~**Switch to a VGA graphics mode.**~~ Done (5.1): Mode 13h + solid fill.
-2. **A pixel/framebuffer drawing module** (`kernel/src/framebuffer.rs` or
-   similar): basic primitives first - set-pixel, fill-rect, blit - then a
-   simple bitmap font renderer for text, since VGA text mode's built-in
-   font goes away once you're in a graphics mode.
+2. ~~**A pixel/framebuffer drawing module.**~~ Done (5.2): primitives +
+   rectangle test pattern. Next: a simple bitmap font renderer for text,
+   since VGA text mode's built-in font goes away once you're in a graphics
+   mode.
 3. **Mouse input**, via the PS/2 mouse (needs interrupts - see
    `interrupts-and-exceptions` - and follows the same driver conventions as
    `drivers`).

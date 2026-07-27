@@ -402,11 +402,17 @@ work both lean on them.
       `Graphics: VGA mode 0x13 320x200 @ 0x000a0000, fill color 1 (solid)`.
       Verified with a QEMU screendump (solid blue, not text) and the v86
       web demo canvas.
-- [ ] **5.2 - Pixel primitives.** A new `kernel/src/framebuffer.rs` with
+- [x] **5.2 - Pixel primitives.** A new `kernel/src/framebuffer.rs` with
       `set_pixel`, `fill_rect`, and `draw_line` over the graphics-mode
       buffer.
       *Done when:* a simple test pattern (a few colored rectangles) draws
       correctly on screen.
+      *Done as:* `kernel/src/framebuffer.rs` paints into the Mode 13h buffer
+      at `0xA0000` (bounds-checked `set_pixel`, clipped `fill_rect`,
+      Bresenham `draw_line`). Boot clears to black and draws four colored
+      rectangles plus a white diagonal so a screendump shows more than one
+      DAC index; serial reports
+      `Graphics: VGA mode 0x13 320x200 @ 0x000a0000, test pattern (4 rects, bg 0)`.
 - [ ] **5.3 - Bitmap font renderer.** Graphics mode has no built-in text
       font (unlike text mode), so add a small embedded bitmap font and a
       `draw_text` function.

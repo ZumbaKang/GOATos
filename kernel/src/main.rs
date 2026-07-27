@@ -29,6 +29,7 @@ use core::panic::PanicInfo;
 
 pub mod ata;
 pub mod exceptions;
+pub mod framebuffer;
 pub mod fs;
 pub mod gdt;
 pub mod graphics;
@@ -52,9 +53,9 @@ global_asm!(include_str!("entry.s"), options(att_syntax));
 pub extern "C" fn kernel_main() -> ! {
     // Graphics mode is the primary, load-bearing display surface now: the
     // bootloader already switched to VGA Mode 13h (see `boot/boot.asm`), so
-    // paint a solid known color before anything else. A botched mode-set
-    // shows up as "not this color" on a screendump; serial still carries the
-    // textual proof for headless CI.
+    // paint the pixel-primitive test pattern before anything else. A botched
+    // mode-set shows up as "not these colored rects" on a screendump; serial
+    // still carries the textual proof for headless CI.
     let graphics = graphics::init();
 
     // The text-mode buffer at 0xb8000 is no longer what the hardware shows,
