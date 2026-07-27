@@ -1,19 +1,19 @@
 ---
 name: memory-management
-description: Guidance for implementing physical/virtual memory management in GOATos (paging and a kernel heap are not built yet; a BIOS memory map and a physical frame allocator are). Use this when starting work on memory management, paging, or adding alloc/Vec/Box support to the kernel.
+description: Guidance for implementing physical/virtual memory management in GOATos (a BIOS memory map, physical frame allocator, and identity-mapped paging exist; a kernel heap is not built yet). Use this when starting work on memory management, paging, or adding alloc/Vec/Box support to the kernel.
 ---
 
-# Memory management (started, no paging yet)
+# Memory management (paging on, no heap yet)
 
-GOATos currently runs entirely without paging: the bootloader (see
-`bootloader-and-linking`) leaves the CPU with a flat, unpaged 32-bit
-protected-mode address space, so every address the kernel handles is a
-physical one. There is no heap, no `alloc` crate, no `Vec`/`Box`/`String` -
-only `core`.
+GOATos boots with paging off (the bootloader - see `bootloader-and-linking` -
+leaves a flat 32-bit protected-mode address space), then
+`kernel/src/memory/paging.rs` identity-maps low memory and sets `CR0.PG`.
+After that every address is still numerically equal to its physical frame,
+but only because the page tables say so. There is no heap, no `alloc` crate,
+no `Vec`/`Box`/`String` - only `core`.
 
-What does exist is the **memory map** and a **physical frame allocator** on
-top of it (steps 1 and 2 below). Paging is the next step, and the first one
-that changes what an address *means*.
+What does exist is the **memory map**, a **physical frame allocator**, and
+**identity-mapped paging** (steps 1-3 below). A kernel heap is the next step.
 
 ## Suggested order of implementation
 
@@ -47,7 +47,7 @@ that changes what an address *means*.
    - `frame::allocate()` hands out a `Frame`, `frame::free()` takes one back
      and *reports* a double free rather than accepting it, and
      `frame::report()` is the summary the boot banner prints. Frames come back
-     un-zeroed; page tables will have to zero their own.
+     un-zeroed; page tables zero their own.
    - The free list lives **inside the free frames** (first four bytes = index
      of the next free frame). So a frame handed out has whatever the last
      owner (or the allocator) left in it, and nothing may write to a frame it
@@ -68,11 +68,24 @@ that changes what an address *means*.
      demo's 32MiB v86. `scripts/ci-test.sh` asserts the QEMU figure, and
      independently re-checks the frame addresses the boot self-test prints
      against the reserved ranges it prints.
-3. **Paging.** Set up a page directory + page tables (32-bit, non-PAE, so
-   two-level paging: page directory -> page table -> 4KiB page) and enable
-   it via `CR3`/`CR0.PG`. Consider identity-mapping low memory first (the
-   simplest correct thing) before doing anything fancier like a higher-half
-   kernel.
+3. **Paging.** *Done* - `kernel/src/memory/paging.rs` builds a 32-bit non-PAE
+   page directory + page tables (directory -> table -> 4KiB page),
+   identity-maps `0..` the top of usable RAM rounded up to 4 MiB (holes
+   included, so VGA at 0xb8000 stays reachable), writes that directory into
+   both TSSes via `tss::set_page_directory`, then loads `CR3` and sets
+   `CR0.PG`. Things worth knowing before building on it:
+   - Page directory and each page table cost one frame from `frame::allocate`,
+     zeroed first. Under QEMU's 128 MiB that is 1 + 32 frames; under v86's
+     32 MiB, 1 + 8.
+   - **Both TSSes carry the real `cr3`.** A double-fault task switch loads
+     `CR3` from the incoming TSS; leaving it at 0 would switch onto a
+     directory of zeroes and triple-fault.
+   - Identity mapping is deliberate and temporary: virtual == physical for
+     everything the kernel touches, which is why existing code keeps running
+     after `CR0.PG` flips. A higher-half kernel would remake this.
+   - 2.6 (guard page below the kernel stack) is the next paging-shaped task;
+     it needs an unmapped page, so resist the urge to keep "map everything
+     forever" as an invariant.
 4. **A kernel heap + global allocator.** Once paging exists, add a
    `#[global_allocator]` (a simple bump or free-list heap allocator is
    fine to start) so `alloc` (and thus `Vec`, `Box`, `String`, etc.)

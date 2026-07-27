@@ -55,10 +55,10 @@ pub struct TaskStateSegment {
     esp2: u32,
     ss2: u16,
     _reserved3: u16,
-    /// Page-directory base. Loaded on a task switch, but only meaningful once
-    /// paging is enabled - which it isn't yet, so zero is fine. **When paging
-    /// lands (roadmap 2.3), both TSSes must carry the kernel's real CR3**, or
-    /// the double-fault task switch will load a page directory of zeroes.
+    /// Page-directory base. Loaded into `CR3` on a task switch. Left at zero
+    /// until [`set_page_directory`] runs (paging setup, roadmap 2.3); after
+    /// that both TSSes must carry the kernel's real directory, or a
+    /// double-fault task switch would load a page directory of zeroes.
     cr3: u32,
     eip: u32,
     eflags: u32,
@@ -243,6 +243,23 @@ pub fn init(double_fault_entry: extern "C" fn() -> !) {
     // Bit 1 reads as 1 on every x86; IF stays clear so the handler can't be
     // interrupted while reporting.
     double_fault.eflags = 0x0000_0002;
+}
+
+/// Records the active page directory in both TSSes.
+///
+/// A hardware task switch loads `CR3` from the incoming TSS, so once paging
+/// is on this has to match the directory [`crate::memory::paging`] installed -
+/// otherwise the double-fault handler would land on a directory of zeroes and
+/// triple-fault before printing anything. Safe to call with paging still off:
+/// the fields are ignored until a task switch actually happens.
+pub fn set_page_directory(cr3: u32) {
+    // SAFETY: single-threaded, and no task switch is in flight (those only
+    // happen on a double fault, which does not return). Writing both keeps
+    // the interrupted-state save and the handler's own image in agreement.
+    let main = unsafe { &mut *MAIN_TSS.0.get() };
+    let double_fault = unsafe { &mut *DOUBLE_FAULT_TSS.0.get() };
+    main.cr3 = cr3;
+    double_fault.cr3 = cr3;
 }
 
 /// Bottom and top (exclusive) of the double-fault handler's private stack.
