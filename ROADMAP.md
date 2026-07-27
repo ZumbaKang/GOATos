@@ -181,16 +181,33 @@ want `Vec`/`Box`/`String`).
       `CR0.PG`. The banner reports the mapped window, the table count, the
       `CR3` the CPU accepted, and `PG=1`; surviving the prints after that line
       is the proof the identity map actually covers the kernel.
-- [ ] **2.4 - Kernel heap + global allocator.** Reserve a heap region,
+- [x] **2.4 - Kernel heap + global allocator.** Reserve a heap region,
       implement (or bring in) a simple bump or free-list `#[global_allocator]`.
       *Done when:* `extern crate alloc;` compiles in, and a `Vec<u8>` (or
       similar) can be pushed into and printed without crashing.
-- [ ] **2.5 - Guard against heap/stack collisions.** Now that both a
+      *Done as:* `kernel/src/memory/heap.rs` takes a contiguous 1 MiB run from
+      the frame allocator (`allocate_contiguous`, bump-only so the frames are
+      one solid physical range), installs a first-fit free-list allocator as
+      the crate's `#[global_allocator]`, and brings `alloc` into
+      `build-std`. A boot self-test pushes 64 bytes into a `Vec<u8>`, resizes
+      it (forcing a second allocation + free), reads the pattern back, and
+      checks the used-byte count returns to where it started on drop.
+      `scripts/ci-test.sh` greps for that verdict.
+
+- [x] **2.5 - Guard against heap/stack collisions.** Now that both a
       dynamic heap and a fixed-size kernel stack exist, add at least a
       basic sanity check or comment/const documenting their layout so they
       can't silently overlap as both grow.
       *Done when:* the layout (stack range, heap range) is written down
       somewhere in code (not just in your head), and boot still succeeds.
+      *Done as:* `kernel/src/memory/layout.rs` documents the address map
+      (64 KiB kernel stack and 4 KiB DF stack inside the reserved kernel
+      image; 1 MiB heap from free frames outside it), exports
+      `KERNEL_STACK_SIZE` / `DOUBLE_FAULT_STACK_SIZE` next to the matching
+      `.skip` in `entry.s`, and runs a boot-time check that the live ranges
+      are sized correctly, nested correctly, and pairwise disjoint. The
+      banner prints the three ranges; `scripts/ci-test.sh` re-parses them
+      and re-derives disjointness itself.
 - [ ] **2.6 - Guard page below the kernel stack.** Now that paging exists,
       leave the page below the kernel stack unmapped so an overflow faults
       immediately instead of silently scribbling over whatever `.bss`

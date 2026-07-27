@@ -240,6 +240,95 @@ if [ -z "$paging_tables" ] || [ "$paging_tables" -ne $((paging_mib / 4)) ]; then
   status=1
 fi
 
+# Kernel heap + global allocator. The self-test is the proof `alloc::vec::Vec`
+# works; the size/range checks keep the reservation honest.
+if ! grep -q "Heap: self-test ok" "$LOG_FILE"; then
+  echo "FAIL: the heap allocator's boot self-test did not pass"
+  status=1
+fi
+
+if grep -q "Heap: SELF-TEST FAILED" "$LOG_FILE"; then
+  echo "FAIL: the heap allocator's boot self-test reported a failure"
+  status=1
+fi
+
+if grep -q "Heap: FAILED" "$LOG_FILE"; then
+  echo "FAIL: kernel could not reserve a contiguous heap region"
+  status=1
+fi
+
+if ! grep -qE "Heap: 0x[0-9a-f]+-0x[0-9a-f]+ \(1024 KiB\), free-list allocator ready" "$LOG_FILE"; then
+  echo "FAIL: heap banner missing the expected 1 MiB free-list region"
+  status=1
+fi
+
+# Heap vs stack layout. The kernel's own check is necessary but not sufficient
+# on its own (a broken predicate can bless itself); re-parse the absolute
+# ranges from the log and re-derive disjointness here.
+if ! grep -q "Layout: kernel stack" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report the heap/stack layout"
+  status=1
+fi
+
+if grep -q "Layout: OVERLAP/MISMATCH" "$LOG_FILE"; then
+  echo "FAIL: kernel reported a heap/stack layout overlap or size mismatch"
+  status=1
+fi
+
+if ! grep -qE "Layout: kernel stack 0x[0-9a-f]+-0x[0-9a-f]+ \(64 KiB\), DF stack 0x[0-9a-f]+-0x[0-9a-f]+ \(4 KiB\), heap 0x[0-9a-f]+-0x[0-9a-f]+ \(1024 KiB\) - disjoint" "$LOG_FILE"; then
+  echo "FAIL: layout banner missing the expected stack/heap sizes or disjoint verdict"
+  status=1
+fi
+
+layout_image="$(sed -n 's/^Layout: image 0x\([0-9a-f]\+\)-0x\([0-9a-f]\+\)$/\1 \2/p' "$LOG_FILE" | head -1)"
+layout_kstack="$(sed -n 's/^Layout: kstack 0x\([0-9a-f]\+\)-0x\([0-9a-f]\+\)$/\1 \2/p' "$LOG_FILE" | head -1)"
+layout_dfstack="$(sed -n 's/^Layout: dfstack 0x\([0-9a-f]\+\)-0x\([0-9a-f]\+\)$/\1 \2/p' "$LOG_FILE" | head -1)"
+layout_heap="$(sed -n 's/^Layout: heap 0x\([0-9a-f]\+\)-0x\([0-9a-f]\+\)$/\1 \2/p' "$LOG_FILE" | head -1)"
+
+if [ -z "$layout_image" ] || [ -z "$layout_kstack" ] || [ -z "$layout_dfstack" ] || [ -z "$layout_heap" ]; then
+  echo "FAIL: kernel did not print absolute layout ranges for image/kstack/dfstack/heap"
+  status=1
+else
+  # shellcheck disable=SC2086
+  set -- $layout_image; image_lo=$((16#$1)); image_hi=$((16#$2))
+  # shellcheck disable=SC2086
+  set -- $layout_kstack; kstack_lo=$((16#$1)); kstack_hi=$((16#$2))
+  # shellcheck disable=SC2086
+  set -- $layout_dfstack; dfstack_lo=$((16#$1)); dfstack_hi=$((16#$2))
+  # shellcheck disable=SC2086
+  set -- $layout_heap; heap_lo=$((16#$1)); heap_hi=$((16#$2))
+
+  if [ "$((kstack_hi - kstack_lo))" -ne $((64 * 1024)) ]; then
+    echo "FAIL: kernel stack size is $((kstack_hi - kstack_lo)) bytes, expected 64 KiB"
+    status=1
+  fi
+  if [ "$((dfstack_hi - dfstack_lo))" -ne 4096 ]; then
+    echo "FAIL: double-fault stack size is $((dfstack_hi - dfstack_lo)) bytes, expected 4 KiB"
+    status=1
+  fi
+  if [ "$((heap_hi - heap_lo))" -ne $((1024 * 1024)) ]; then
+    echo "FAIL: heap size is $((heap_hi - heap_lo)) bytes, expected 1 MiB"
+    status=1
+  fi
+  if [ "$kstack_lo" -lt "$image_lo" ] || [ "$kstack_hi" -gt "$image_hi" ]; then
+    echo "FAIL: kernel stack is outside the kernel image"
+    status=1
+  fi
+  if [ "$dfstack_lo" -lt "$image_lo" ] || [ "$dfstack_hi" -gt "$image_hi" ]; then
+    echo "FAIL: double-fault stack is outside the kernel image"
+    status=1
+  fi
+  # Half-open ranges overlap when a_lo < b_hi && b_lo < a_hi.
+  if [ "$kstack_lo" -lt "$dfstack_hi" ] && [ "$dfstack_lo" -lt "$kstack_hi" ]; then
+    echo "FAIL: kernel stack and double-fault stack overlap"
+    status=1
+  fi
+  if [ "$image_lo" -lt "$heap_hi" ] && [ "$heap_lo" -lt "$image_hi" ]; then
+    echo "FAIL: heap overlaps the kernel image (and therefore a stack)"
+    status=1
+  fi
+fi
+
 # A stray interrupt on a vector nothing owns, once interrupts are on.
 if grep -q "UNHANDLED INTERRUPT" "$LOG_FILE"; then
   echo "FAIL: kernel took an interrupt it had no handler for"

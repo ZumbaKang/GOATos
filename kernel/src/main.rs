@@ -17,7 +17,13 @@
 // what the (still-unstable) `x86-interrupt` calling convention does. See
 // `idt::Handler`.
 #![feature(abi_x86_interrupt)]
+// `alloc` needs a crate-level handler for OOM; without it a failed `Vec`
+// push would hit an unresolved symbol instead of our panic path.
+#![feature(alloc_error_handler)]
 
+extern crate alloc;
+
+use core::alloc::Layout;
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 
@@ -221,6 +227,31 @@ pub extern "C" fn kernel_main() -> ! {
     vga_println!("{}", paging);
     serial_println!("{}", paging);
 
+    // Carve a contiguous run of frames into a heap and install it as the
+    // global allocator. Needs paging on first only in the dependency sense
+    // (identity map already covers the frames); the self-test is what proves
+    // `alloc::vec::Vec` actually works end to end.
+    let heap = memory::heap::init();
+    vga_println!("{}", heap);
+    serial_println!("{}", heap);
+    let heap_test = memory::heap::self_test();
+    vga_println!("{}", heap_test);
+    serial_println!("{}", heap_test);
+
+    // Pin the heap/stack layout in writing and check the ranges are still
+    // disjoint. The stacks live inside the reserved kernel image; the heap
+    // is carved from free frames outside it - so by construction they cannot
+    // collide, and a failure here means that construction broke.
+    let layout = memory::layout::check(heap);
+    vga_println!("{}", layout);
+    serial_println!("{}", layout);
+    // Also dump the absolute ranges over serial so a CI script can re-derive
+    // disjointness itself, rather than trusting the kernel's verdict.
+    serial_println!("Layout: image {}", layout.kernel_image);
+    serial_println!("Layout: kstack {}", layout.kernel_stack);
+    serial_println!("Layout: dfstack {}", layout.double_fault_stack);
+    serial_println!("Layout: heap {}", layout.heap);
+
     // The last piece of setup, and the first moment the kernel can be
     // interrupted at all. The masks are re-read afterwards because they are
     // what makes this uneventful: every IRQ line is still disabled, so nothing
@@ -262,4 +293,9 @@ pub fn hlt_loop() -> ! {
 fn panic(info: &PanicInfo) -> ! {
     serial_println!("KERNEL PANIC: {}", info);
     hlt_loop();
+}
+
+#[alloc_error_handler]
+fn alloc_error(layout: Layout) -> ! {
+    panic!("allocation failed: size={} align={}", layout.size(), layout.align());
 }

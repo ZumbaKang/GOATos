@@ -24,8 +24,14 @@ _start32:
     hlt
     jmp .Lhang
 
+/* 64 KiB kernel stack in .bss. Grows down from stack_top. Exported so
+ * memory::layout can name the range next to the heap and refuse to boot
+ * quietly if the two ever overlap (roadmap 2.5). Keep the size in step with
+ * KERNEL_STACK_SIZE in kernel/src/memory/layout.rs. */
 .section .bss
 .align 16
+.global stack_bottom
+.global stack_top
 stack_bottom:
-    .skip 65536 /* 64 KiB kernel stack */
+    .skip 65536 /* 64 KiB = KERNEL_STACK_SIZE */
 stack_top:
