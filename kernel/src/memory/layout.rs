@@ -138,21 +138,17 @@ impl fmt::Display for Report {
 /// module documents. Cheap enough to run on every boot; the printed report is
 /// what keeps the layout from living only in someone's head.
 pub fn check(heap: heap::Report) -> Report {
-    // SAFETY: these are linker/assembly symbols naming objects that exist for
-    // the life of the kernel; we only take their addresses, never read the
-    // bytes through these references.
-    let kernel_image = unsafe {
-        Range::new(
-            core::ptr::addr_of!(__kernel_start) as usize,
-            core::ptr::addr_of!(__kernel_end) as usize,
-        )
-    };
-    let kernel_stack = unsafe {
-        Range::new(
-            core::ptr::addr_of!(stack_bottom) as usize,
-            core::ptr::addr_of!(stack_top) as usize,
-        )
-    };
+    // Only the *addresses* of these linker/assembly symbols are taken - they
+    // name objects that exist for the life of the kernel, and `addr_of!` does
+    // not read through them (same pattern as `frame::kernel_image`).
+    let kernel_image = Range::new(
+        core::ptr::addr_of!(__kernel_start) as usize,
+        core::ptr::addr_of!(__kernel_end) as usize,
+    );
+    let kernel_stack = Range::new(
+        core::ptr::addr_of!(stack_bottom) as usize,
+        core::ptr::addr_of!(stack_top) as usize,
+    );
     let (df_bottom, df_top) = tss::double_fault_stack_range();
     let double_fault_stack = Range::new(df_bottom as usize, df_top as usize);
     let heap_range = if heap.ready() {
