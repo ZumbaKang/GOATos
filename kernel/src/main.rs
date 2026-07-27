@@ -30,6 +30,7 @@ use core::panic::PanicInfo;
 pub mod exceptions;
 pub mod gdt;
 pub mod idt;
+pub mod input;
 pub mod interrupts;
 pub mod keyboard;
 pub mod memory;
@@ -296,22 +297,24 @@ pub extern "C" fn kernel_main() -> ! {
         pic.slave_mask
     );
 
-    // Second real IRQ line: PS/2 keyboard on IRQ1. Typing echoes straight to
-    // VGA (and serial) from the handler - proof the translate path works
-    // before roadmap 3.3 introduces a proper input queue.
+    // Second real IRQ line: PS/2 keyboard on IRQ1. The handler only enqueues
+    // translated keys; the idle loop below drains and echoes them.
     keyboard::init();
     let pic = pic::state();
     diag_println!(
-        "Keyboard: PS/2 on IRQ1 -> vector {}, IMR {:#04x}/{:#04x} (type to echo)",
+        "Keyboard: PS/2 on IRQ1 -> vector {}, IMR {:#04x}/{:#04x}",
         keyboard::VECTOR,
         pic.master_mask,
         pic.slave_mask
     );
+    diag_println!(
+        "Input: {}-event ring buffer (IRQ pushes, idle loop drains)",
+        input::CAPACITY
+    );
 
-    // Idle: sleep until the next IRQ, and once a second prove the tick
-    // counter is actually advancing (the "Done when" for roadmap 3.1).
-    // Keyboard echoes arrive from IRQ1 on their own and do not need the loop.
-    idle_with_timer();
+    // Idle: sleep until the next IRQ, drain any typed keys into an echo, and
+    // once a second prove the tick counter is actually advancing.
+    idle_with_input();
 }
 
 /// Parks the CPU for good, waking only to halt again. Used by an exception
@@ -322,11 +325,14 @@ pub fn hlt_loop() -> ! {
     }
 }
 
-/// Idles like [`hlt_loop`], but wakes on each timer tick and reports the
-/// counter once per second over serial - proof that IRQ0 is firing.
-fn idle_with_timer() -> ! {
+/// Idles like [`hlt_loop`], but wakes on each IRQ to:
+/// - drain the keyboard input queue and echo each event (roadmap 3.3),
+/// - report the PIT tick counter once per second (roadmap 3.1).
+fn idle_with_input() -> ! {
     let mut last_second = 0u32;
     loop {
+        drain_input_queue();
+
         let second = pit::seconds();
         if second > last_second {
             last_second = second;
@@ -335,6 +341,32 @@ fn idle_with_timer() -> ! {
             diag_println!("PIT: tick {} ({} s)", pit::ticks(), second);
         }
         unsafe { asm!("hlt") };
+    }
+}
+
+/// Pops every pending [`input::KeyEvent`] and echoes it to VGA + serial.
+///
+/// This is the consumer half of roadmap 3.3: the IRQ handler only enqueues,
+/// so typing never races a print that was already in progress, and the shell
+/// (roadmap 4.x) can later replace this echo with a line editor.
+fn drain_input_queue() {
+    while let Some(event) = input::pop() {
+        match event {
+            input::KeyEvent::Char(c) => {
+                vga_print!("{}", c);
+                serial_print!("{}", c);
+            }
+            input::KeyEvent::Enter => {
+                vga_println!();
+                serial_println!();
+            }
+            input::KeyEvent::Backspace => {
+                vga::backspace();
+                // Erase the previous character on a serial terminal that
+                // understands the usual backspace-space-backspace sequence.
+                serial_print!("\x08 \x08");
+            }
+        }
     }
 }
 

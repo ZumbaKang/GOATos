@@ -397,6 +397,13 @@ if ! grep -qE "Keyboard: PS/2 on IRQ1 -> vector 33, IMR 0xfc/0xff" "$LOG_FILE"; 
   status=1
 fi
 
+# Input event queue (roadmap 3.3): IRQ1 pushes, the idle loop drains. The
+# capacity line is proof the queue was wired up before the idle loop starts.
+if ! grep -qE "Input: [0-9]+-event ring buffer \(IRQ pushes, idle loop drains\)" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report the input event queue"
+  status=1
+fi
+
 # A stray interrupt on a vector nothing owns, once interrupts are on.
 # (IRQ0/IRQ1 have real handlers now, so timer/keyboard must not land here.)
 if grep -q "UNHANDLED INTERRUPT" "$LOG_FILE"; then
