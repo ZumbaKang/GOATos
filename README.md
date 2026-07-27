@@ -24,7 +24,9 @@ and a "hello world" on screen.
       kernel stack so overflow double-faults instead of corrupting memory.
 - [x] Keyboard input (PIT timer + PS/2 keyboard on IRQ0/IRQ1, input event
       queue decoupling the IRQ handler from consumers)
-- [ ] A minimal shell
+- [x] **A minimal shell**: line editor on the keyboard queue, built-ins
+      (`help`/`clear`/`echo`/`about`), and a cooperative round-robin
+      scheduler (FIFO ready queue, explicit yield) with 3+ fair tasks.
 - [ ] Graphics mode + a basic GUI
 - [ ] ...and much more, one step at a time.
 

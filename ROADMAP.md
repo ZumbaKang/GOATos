@@ -348,10 +348,18 @@ rather than blocking this one.
       The shell's once-a-second PIT line and the demo's `Task: demo counter N`
       interleave on serial; the demo also prints on VGA. `scripts/ci-test.sh`
       checks the banner and that the counter advances at least twice.
-- [ ] **4.4 - Round-robin scheduler.** A minimal ready-queue that decides
+- [x] **4.4 - Round-robin scheduler.** A minimal ready-queue that decides
       which task runs next after a yield.
       *Done when:* 3+ tasks round-robin fairly (each gets roughly equal
       turns) over a short run.
+      *Done as:* `kernel/src/task/` keeps a FIFO ready queue of task ids
+      (the running task is not in it). `yield_now` pushes the current task
+      onto the tail and pops the head; `spawn` enqueues the new task ready.
+      Boot spawns shell + two demo counters (3 tasks). Each successful
+      switch-in bumps a per-task turn counter; once a second the shell prints
+      `Scheduler: turns [0]=N [1]=M [2]=P` and the demos print their own
+      counters. `scripts/ci-test.sh` checks the banner, that both demos
+      advance, and that the last turn triple has spread ≤ 1.
 - [ ] **4.5 - (optional, needs filesystem) Load & run from disk.** Once a
       basic filesystem exists (see its own skill), extend the shell with a
       command that reads a file's contents (e.g. `cat <file>`) - the first
