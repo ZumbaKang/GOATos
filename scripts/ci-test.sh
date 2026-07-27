@@ -207,6 +207,39 @@ for frame_hex in "${allocated_frames[@]}"; do
   done
 done
 
+# Paging: identity map + CR0.PG. Surviving past this line (the boot-success
+# message still appears once) is the real proof the map covers the kernel;
+# these checks pin the banner shape and the size to QEMU's RAM.
+if ! grep -q "Paging: identity-mapped" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report enabling an identity-mapped page table"
+  status=1
+fi
+
+if grep -q "Paging: FAILED" "$LOG_FILE"; then
+  echo "FAIL: paging setup reported failure"
+  status=1
+fi
+
+if ! grep -qE "Paging: identity-mapped 0x00000000-0x[0-9a-f]+ \([0-9]+ MiB\) via [0-9]+ page tables, CR3=0x[0-9a-f]+, PG=1" "$LOG_FILE"; then
+  echo "FAIL: paging banner missing CR3/PG=1 (paging not actually enabled)"
+  status=1
+fi
+
+paging_summary="$(grep -m1 '^Paging: identity-mapped' "$LOG_FILE")"
+paging_mib="$(sed -n 's/^Paging: identity-mapped 0x[0-9a-f]\+-0x[0-9a-f]\+ (\([0-9]\+\) MiB).*/\1/p' <<<"$paging_summary")"
+paging_tables="$(sed -n 's/^Paging:.*via \([0-9]\+\) page tables.*/\1/p' <<<"$paging_summary")"
+# Identity map covers usable RAM rounded up to 4 MiB, so under QEMU's 128MiB
+# default it is exactly 128 MiB via 32 page tables. Far below that would mean
+# only low memory was mapped (and the kernel image above 1MiB would fault).
+if [ -z "$paging_mib" ] || [ "$paging_mib" -lt 100 ] || [ "$paging_mib" -gt 128 ]; then
+  echo "FAIL: identity-mapped window (${paging_mib:-none} MiB) does not match QEMU's 128MiB default"
+  status=1
+fi
+if [ -z "$paging_tables" ] || [ "$paging_tables" -ne $((paging_mib / 4)) ]; then
+  echo "FAIL: page table count (${paging_tables:-none}) does not match mapped size (${paging_mib:-?} MiB / 4)"
+  status=1
+fi
+
 # A stray interrupt on a vector nothing owns, once interrupts are on.
 if grep -q "UNHANDLED INTERRUPT" "$LOG_FILE"; then
   echo "FAIL: kernel took an interrupt it had no handler for"

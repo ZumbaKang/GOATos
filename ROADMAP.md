@@ -166,12 +166,21 @@ want `Vec`/`Box`/`String`).
       `scripts/ci-test.sh` re-checks the printed addresses itself rather than
       trusting that verdict - which is what caught the frames in the reserved
       ranges when the reservations were deliberately disabled for one boot.
-- [ ] **2.3 - Page tables + identity mapping.** Build a page directory and
+- [x] **2.3 - Page tables + identity mapping.** Build a page directory and
       page tables (32-bit, non-PAE: directory -> table -> 4KiB page),
       identity-mapping low memory (the simplest correct starting point -
       no higher-half kernel yet).
       *Done when:* paging is enabled (`CR3`/`CR0.PG`) and the kernel keeps
       running and printing normally afterward, in both QEMU and v86.
+      *Done as:* `kernel/src/memory/paging.rs` allocates a page directory and
+      one page table per 4 MiB from the frame allocator (zeroing each frame
+      first - they come back dirty), identity-maps `0..` the top of usable RAM
+      rounded up to 4 MiB (so the VGA hole at 0xb8000 is covered too), writes
+      that directory into both TSSes via `tss::set_page_directory` (a task
+      switch loads `CR3` from the incoming TSS), then loads `CR3` and sets
+      `CR0.PG`. The banner reports the mapped window, the table count, the
+      `CR3` the CPU accepted, and `PG=1`; surviving the prints after that line
+      is the proof the identity map actually covers the kernel.
 - [ ] **2.4 - Kernel heap + global allocator.** Reserve a heap region,
       implement (or bring in) a simple bump or free-list `#[global_allocator]`.
       *Done when:* `extern crate alloc;` compiles in, and a `Vec<u8>` (or

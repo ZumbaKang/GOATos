@@ -213,6 +213,14 @@ pub extern "C" fn kernel_main() -> ! {
     }
     serial_println!("{}", frame_test);
 
+    // Identity-map everything the kernel already touches and flip `CR0.PG`.
+    // Until this point every address was physical; afterwards the same
+    // numbers still work, but only because the page tables say so. Runs
+    // before `sti` so a botched map faults with interrupts still masked.
+    let paging = memory::paging::init(&memory);
+    vga_println!("{}", paging);
+    serial_println!("{}", paging);
+
     // The last piece of setup, and the first moment the kernel can be
     // interrupted at all. The masks are re-read afterwards because they are
     // what makes this uneventful: every IRQ line is still disabled, so nothing
