@@ -335,12 +335,19 @@ rather than blocking this one.
       and marks the serial log with `(screen cleared)`. Verified with QEMU
       monitor `sendkey` for each built-in plus an unknown command (VGA
       screendump + serial), and against the v86 web demo.
-- [ ] **4.3 - Cooperative tasks.** Give each "task" (to start: just the
+- [x] **4.3 - Cooperative tasks.** Give each "task" (to start: just the
       shell and maybe one background counter/demo task) its own stack and
       a hand-written context switch (save/restore registers including
       `esp`) that runs on an explicit `yield`, not a timer yet.
       *Done when:* two cooperative tasks (e.g. the shell + a task that
       prints a counter) visibly interleave their output.
+      *Done as:* `kernel/src/task/` parks callee-saved regs + `esp` in
+      `switch.s` (`context_switch`); task 0 is the shell on the existing
+      kernel stack, task 1 is a heap-stack demo counter spawned at boot.
+      Each loop calls `task::yield_now` (explicit only - no preemption).
+      The shell's once-a-second PIT line and the demo's `Task: demo counter N`
+      interleave on serial; the demo also prints on VGA. `scripts/ci-test.sh`
+      checks the banner and that the counter advances at least twice.
 - [ ] **4.4 - Round-robin scheduler.** A minimal ready-queue that decides
       which task runs next after a yield.
       *Done when:* 3+ tasks round-robin fairly (each gets roughly equal

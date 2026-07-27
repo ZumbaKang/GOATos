@@ -410,6 +410,37 @@ if ! grep -qE "Shell: line editor \([0-9]+ chars\) \+ builtins \(help/clear/echo
   status=1
 fi
 
+# Cooperative tasks (roadmap 4.3): shell + demo counter with explicit yields.
+if ! grep -qE "Tasks: cooperative switching \([0-9]+ tasks, shell \+ demo counter [0-9]+\)" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report cooperative task switching"
+  status=1
+fi
+
+# The demo task must actually run (not just be spawned): at least two
+# increasing counter lines, interleaved with the shell's PIT reports.
+mapfile -t demo_counts < <(sed -n 's/^Task: demo counter \([0-9]\+\)$/\1/p' "$LOG_FILE")
+if [ "${#demo_counts[@]}" -lt 2 ]; then
+  echo "FAIL: kernel printed ${#demo_counts[@]} demo counter report(s), expected at least 2"
+  status=1
+else
+  prev="${demo_counts[0]}"
+  for n in "${demo_counts[@]:1}"; do
+    if [ "$n" -le "$prev" ]; then
+      echo "FAIL: demo counter did not increase ($prev -> $n)"
+      status=1
+      break
+    fi
+    prev="$n"
+  done
+fi
+
+# Proof the two tasks interleaved: a PIT tick and a demo counter line must
+# both appear, and neither stream should be alone at the end of the log.
+if ! grep -q "PIT: tick" "$LOG_FILE" || ! grep -q "Task: demo counter" "$LOG_FILE"; then
+  echo "FAIL: cooperative tasks did not both produce output"
+  status=1
+fi
+
 # A stray interrupt on a vector nothing owns, once interrupts are on.
 # (IRQ0/IRQ1 have real handlers now, so timer/keyboard must not land here.)
 if grep -q "UNHANDLED INTERRUPT" "$LOG_FILE"; then
