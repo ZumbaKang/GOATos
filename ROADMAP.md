@@ -322,12 +322,19 @@ rather than blocking this one.
       showing a fresh `> ` prompt. Verified with QEMU monitor `sendkey`
       (typo + backspace + enter yields the corrected line on the VGA
       screendump and in the serial log) and against the v86 web demo.
-- [ ] **4.2 - Built-in commands.** A small command dispatcher with a
+- [x] **4.2 - Built-in commands.** A small command dispatcher with a
       handful of built-ins: `help` (list commands), `clear` (clear the VGA
       screen), `echo <text>`, `about` (prints the GOATos banner/version).
       *Done when:* each built-in works as expected from the prompt, and an
       unrecognized command prints a friendly "unknown command" instead of
       doing nothing or crashing.
+      *Done as:* `shell::run_line` splits the submitted buffer on the first
+      whitespace word and dispatches `help` / `clear` / `echo` / `about`;
+      anything else prints `unknown command: <name>`. Empty lines are a
+      no-op (fresh prompt only). `clear` wipes VGA via `vga::clear_screen`
+      and marks the serial log with `(screen cleared)`. Verified with QEMU
+      monitor `sendkey` for each built-in plus an unknown command (VGA
+      screendump + serial), and against the v86 web demo.
 - [ ] **4.3 - Cooperative tasks.** Give each "task" (to start: just the
       shell and maybe one background counter/demo task) its own stack and
       a hand-written context switch (save/restore registers including

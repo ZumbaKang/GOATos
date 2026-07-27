@@ -1,10 +1,9 @@
-//! Minimal shell line editor (roadmap 4.1).
+//! Minimal interactive shell (roadmap 4.1 + 4.2).
 //!
 //! Sits on top of the Phase 3 input queue: typed characters append to a
 //! fixed-size line buffer and echo as they arrive, backspace removes the
-//! last character, and enter submits the line so the whole thing can be
-//! echoed back. Built-in commands (roadmap 4.2) will replace that echo
-//! with a dispatcher; for now the submitted line is the whole product.
+//! last character, and enter submits the line to a small built-in command
+//! dispatcher (`help` / `clear` / `echo` / `about`).
 
 use crate::input::{self, KeyEvent};
 use crate::{serial_print, serial_println, vga, vga_print, vga_println};
@@ -89,10 +88,7 @@ impl LineEditor {
             KeyEvent::Enter => {
                 vga_println!();
                 serial_println!();
-                // Echo the whole submitted line back - the "Done when" for 4.1.
-                let line = self.as_str();
-                vga_println!("{}", line);
-                serial_println!("{}", line);
+                run_line(self.as_str());
                 self.clear();
                 print_prompt();
                 true
@@ -116,4 +112,68 @@ pub fn drain_input(editor: &mut LineEditor) {
     while let Some(event) = input::pop() {
         editor.handle_event(event);
     }
+}
+
+/// Dispatches a submitted line to a built-in, or reports an unknown command.
+fn run_line(line: &str) {
+    let line = line.trim();
+    if line.is_empty() {
+        return;
+    }
+
+    let (cmd, rest) = split_command(line);
+    match cmd {
+        "help" => cmd_help(),
+        "clear" => cmd_clear(),
+        "echo" => cmd_echo(rest),
+        "about" => cmd_about(),
+        other => {
+            vga_println!("unknown command: {}", other);
+            serial_println!("unknown command: {}", other);
+        }
+    }
+}
+
+/// Splits `line` into the first whitespace-delimited word and the remainder
+/// (with leading whitespace on the remainder stripped).
+fn split_command(line: &str) -> (&str, &str) {
+    let trimmed = line.trim_start();
+    match trimmed.find(char::is_whitespace) {
+        Some(idx) => {
+            let (cmd, rest) = trimmed.split_at(idx);
+            (cmd, rest.trim_start())
+        }
+        None => (trimmed, ""),
+    }
+}
+
+fn cmd_help() {
+    vga_println!("Built-in commands:");
+    vga_println!("  help   - list commands");
+    vga_println!("  clear  - clear the VGA screen");
+    vga_println!("  echo   - print arguments");
+    vga_println!("  about  - about GOATos");
+    serial_println!("Built-in commands:");
+    serial_println!("  help   - list commands");
+    serial_println!("  clear  - clear the VGA screen");
+    serial_println!("  echo   - print arguments");
+    serial_println!("  about  - about GOATos");
+}
+
+fn cmd_clear() {
+    vga::clear_screen();
+    // Serial has no clear; mark the boundary so headless logs stay readable.
+    serial_println!("(screen cleared)");
+}
+
+fn cmd_echo(args: &str) {
+    vga_println!("{}", args);
+    serial_println!("{}", args);
+}
+
+fn cmd_about() {
+    vga_println!("GOATos - a from-scratch 32-bit x86 OS in Rust");
+    vga_println!("Booted via a hand-written MBR bootloader.");
+    serial_println!("GOATos - a from-scratch 32-bit x86 OS in Rust");
+    serial_println!("Booted via a hand-written MBR bootloader.");
 }
