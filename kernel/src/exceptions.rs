@@ -301,6 +301,7 @@ pub fn trigger_debug_exception() {
         // frame fails and the CPU escalates to a double fault on the private
         // stack - which is the whole point of roadmap 2.6.
         #[inline(never)]
+        #[allow(unconditional_recursion)] // overflowing the stack is the point
         fn blow_stack() -> ! {
             let mut pad = [0u8; 256];
             // SAFETY: writing into our own stack-local buffer.
