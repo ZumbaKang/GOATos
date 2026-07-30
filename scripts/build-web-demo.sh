@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Assembles a static site that boots GOATos in the browser via v86:
-#   1. builds the GRUB ISO the same way `make iso` does for local/QEMU use
+#   1. builds the disk image the same way `make disk` does for local/QEMU use
 #   2. fetches the v86 emulator runtime (wasm + JS + BIOS blobs) via npm
-#   3. copies everything into $OUT_DIR, ready to be served as-is (e.g. by
-#      GitHub Pages, or locally with `python3 -m http.server`)
+#   3. copies web pages + runtime into $OUT_DIR, ready to be served as-is
+#      (GitHub Pages, or locally with `python3 -m http.server`)
+#
+# Pages:
+#   index.html  — hub
+#   gui.html    — scaled Mode 13h framebuffer + serial log (primary GUI test)
 #
 # v86's runtime files are fetched here rather than committed to the repo, so
 # multi-megabyte binary blobs don't bloat git history and stay in sync with
@@ -31,6 +35,7 @@ rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR/v86"
 
 cp "$ROOT_DIR/web/index.html" "$OUT_DIR/index.html"
+cp "$ROOT_DIR/web/gui.html" "$OUT_DIR/gui.html"
 cp "$ROOT_DIR/build/disk.img" "$OUT_DIR/disk.img"
 
 V86_PKG="$V86_SCRATCH_DIR/node_modules/v86"
@@ -41,4 +46,5 @@ curl -sSfL "$V86_BIOS_BASE_URL/vgabios.bin" -o "$OUT_DIR/v86/vgabios.bin"
 
 echo "==> Done. Serve locally with:"
 echo "      python3 -m http.server -d '$OUT_DIR' 8080"
-echo "    then open http://localhost:8080"
+echo "    then open http://localhost:8080/       (hub)"
+echo "         or http://localhost:8080/gui.html (framebuffer + serial)"

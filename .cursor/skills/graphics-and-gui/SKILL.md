@@ -44,6 +44,11 @@ up from characters to pixels.
   `web-demo-packaging`, especially the "boots in QEMU but not in v86"
   debugging process, since video mode support is a plausible place for the
   two to diverge). Mode 13h is the conservative choice for that reason.
+  On GitHub Pages / `_site/`, open **`gui.html`** (scaled canvas + serial
+  log) to verify graphics — not only the hub page.
+- GUI tasks live in [`ROADMAP-GUI.md`](../../../ROADMAP-GUI.md) and are
+  picked by automations with `TRACK=gui`. Core/shell/FS work stays on
+  `ROADMAP-CORE.md` so the tracks can advance in parallel.
 - Do not grow `boot/boot.asm` casually - it is still on a 512-byte budget
   (see `bootloader-and-linking`). Higher modes (VBE) likely need a
   second-stage loader or a real-mode helper stub, not more MBR bytes.

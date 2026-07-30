@@ -1,6 +1,6 @@
 ---
 name: web-demo-packaging
-description: How the browser-based GOATos demo works (v86, web/index.html, scripts/build-web-demo.sh), how to rebuild and test it locally with a headless browser, and specific v86 compatibility gotchas that were discovered the hard way. Use this when changing web/, scripts/build-web-demo.sh, the boot process, or anything that affects what shows up on screen.
+description: How the browser-based GOATos demo works (v86, web/index.html, web/gui.html, scripts/build-web-demo.sh), how to rebuild and test it locally with a headless browser, and specific v86 compatibility gotchas that were discovered the hard way. Use this when changing web/, scripts/build-web-demo.sh, the boot process, or anything that affects what shows up on screen.
 ---
 
 # Web demo packaging (v86)
@@ -18,22 +18,38 @@ x86 emulator compiled to WebAssembly. `scripts/build-web-demo.sh`:
 4. assembles everything into `$OUT_DIR` (`_site/` by default), ready to be
    served as a static site (this is what CI publishes to GitHub Pages)
 
+## Pages
+
+| Path | File | Purpose |
+|------|------|---------|
+| `/` | `web/index.html` | Hub with links |
+| `/gui.html` | `web/gui.html` | **Primary GUI test page**: CSS-scaled Mode 13h canvas (320×200 → 3×) plus a live serial (COM1) log panel |
+
+Since roadmap 5.1 the kernel runs in VGA Mode 13h. v86 switches from the
+text `<div>` to the `<canvas>` inside `#screen_container` automatically.
+`gui.html` is what you open on GitHub Pages to see framebuffer work; the
+serial panel mirrors what `make run` / CI grep for.
+
 To test locally:
 
 ```bash
 ./scripts/build-web-demo.sh
 python3 -m http.server -d _site 8080
-# open http://localhost:8080
+# open http://localhost:8080/gui.html
 ```
 
 ## Testing headlessly (no display), with a real browser
 
 A system Chrome + `puppeteer` (via `npm install puppeteer`, pointed at
 `executablePath: "/usr/local/bin/google-chrome"` with `--no-sandbox`) can
-drive the page and either read the live text overlay
-(`document.querySelector("#screen_container div").innerText`) or take a
-real `page.screenshot()`. This was essential for debugging boot issues that
+drive the page and either read the serial panel
+(`#serial_log` on `gui.html`), sample the graphics canvas, or take a real
+`page.screenshot()`. This was essential for debugging boot issues that
 only manifested under v86, not QEMU - see below.
+
+For GUI track verification, prefer loading `/gui.html`, waiting until
+`#serial_log` contains the framebuffer banner (e.g. `Framebuffer: VGA mode`),
+then screenshotting the scaled canvas region.
 
 ## v86 compatibility gotchas discovered while building this
 
