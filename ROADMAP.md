@@ -194,7 +194,7 @@ want `Vec`/`Box`/`String`).
       checks the used-byte count returns to where it started on drop.
       `scripts/ci-test.sh` greps for that verdict.
 
-- [x] **2.5 - Guard against heap/stack collisions.** Now that both a
+- [ ] **2.5 - Guard against heap/stack collisions.** Now that both a
       dynamic heap and a fixed-size kernel stack exist, add at least a
       basic sanity check or comment/const documenting their layout so they
       can't silently overlap as both grow.

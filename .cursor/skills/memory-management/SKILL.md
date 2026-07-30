@@ -1,9 +1,9 @@
 ---
 name: memory-management
-description: Guidance for implementing physical/virtual memory management in GOATos (a BIOS memory map, physical frame allocator, identity-mapped paging, a kernel heap/`#[global_allocator]`, a heap/stack layout check, and a stack guard page exist). Use this when starting work on memory management, paging, or adding alloc/Vec/Box support to the kernel.
+description: Guidance for implementing physical/virtual memory management in GOATos (a BIOS memory map, physical frame allocator, identity-mapped paging, and a kernel heap/`#[global_allocator]` exist). Use this when starting work on memory management, paging, or adding alloc/Vec/Box support to the kernel.
 ---
 
-# Memory management (Phase 2 complete)
+# Memory management (paging on, heap on)
 
 GOATos boots with paging off (the bootloader - see `bootloader-and-linking` -
 leaves a flat 32-bit protected-mode address space), then
@@ -12,11 +12,14 @@ After that every address is still numerically equal to its physical frame,
 but only because the page tables say so. A kernel heap
 (`kernel/src/memory/heap.rs`) then carves out 1 MiB of contiguous frames and
 installs a free-list `#[global_allocator]`, so `alloc` (`Vec`, `Box`,
-`String`) is available. `kernel/src/memory/layout.rs` records the heap,
-stacks, and the unmapped guard page between the stacks, and checks they
-stay correctly laid out at boot.
+`String`) is available.
 
-What exists (all of Phase 2):
+What does exist is the **memory map**, a **physical frame allocator**,
+**identity-mapped paging**, and a **kernel heap** (steps 1-4 below). Layout
+documentation (2.5) and a stack guard page (2.6) are the remaining Phase 2
+tasks.
+
+## Suggested order of implementation
 
 1. **Get a memory map.** *Done* - `detect_memory` in `boot/boot.asm` walks
    `INT 15h, EAX=0xE820` in real mode and writes the raw entries to a fixed
@@ -84,9 +87,9 @@ What exists (all of Phase 2):
    - Identity mapping is deliberate and temporary: virtual == physical for
      everything the kernel touches, which is why existing code keeps running
      after `CR0.PG` flips. A higher-half kernel would remake this.
-   - **One deliberate hole:** the 4 KiB `stack_guard_page` immediately below
-     the kernel stack is left not-present. Do not "map everything forever" -
-     that hole is load-bearing.
+   - 2.6 (guard page below the kernel stack) is the next paging-shaped task;
+     it needs an unmapped page, so resist the urge to keep "map everything
+     forever" as an invariant.
 4. **A kernel heap + global allocator.** *Done* -
    `kernel/src/memory/heap.rs` takes a contiguous 1 MiB run via
    `frame::allocate_contiguous` (bump-only - the free list can hand back
@@ -104,26 +107,8 @@ What exists (all of Phase 2):
      resizes (second allocation + free of the old buffer), reads back,
      and checks the used-byte count returns to baseline on drop.
    - The heap range is whatever contiguous run the bump cursor could
-     spare that boot - not a fixed link-time address. [`layout`] records
-     that range next to the kernel stacks and checks they stay disjoint.
-5. **Heap/stack layout check.** *Done* - `kernel/src/memory/layout.rs`
-   names the live ranges (kernel stack and DF stack from `entry.s`, guard
-   page, heap from `heap::Report`, kernel image from the linker symbols)
-   and asserts at boot that the stacks sit inside the image, match their
-   documented sizes, are adjacent around the guard (`DF | guard | kstack`),
-   and share no bytes with the heap. The construction that makes the heap
-   stay clear is the frame allocator's reservation of
-   `__kernel_start..__kernel_end`; the check is what keeps a future change
-   from quietly undoing it.
-6. **Stack guard page.** *Done* - `entry.s` lays out the three regions
-   page-aligned; `paging::init` skips writing a present PTE for
-   `stack_guard_page`; `layout::check` re-reads that PTE via
-   `paging::is_present` and refuses to bless a mapped guard. A stack
-   overflow (`KERNEL_FEATURES=trigger-stack-overflow`) grows `esp` into the
-   hole; the CPU cannot push a #PF frame there, so delivery escalates to a
-   double fault on the private stack - finishing the verification gap left
-   by task 1.4. Segment limits cannot do this job: QEMU's TCG (and v86) do
-   not enforce them.
+     spare that boot - not a fixed link-time address. Task 2.5 is where
+     that range gets written down next to the stack's.
 
 ## Conventions to follow
 

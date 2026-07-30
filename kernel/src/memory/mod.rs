@@ -19,14 +19,8 @@
 //! [`heap`] is where smaller allocations come from: a contiguous run of
 //! frames turned into a free-list heap and installed as the crate's
 //! `#[global_allocator]`, so `alloc` (`Vec`, `Box`, `String`) works.
-//!
-//! [`layout`] is the written-down map of those pieces against the kernel
-//! stacks and the unmapped guard page between them: ranges recorded at boot,
-//! with a disjointness/adjacency check so a future change cannot silently put
-//! the heap on top of a stack (or remap the guard).
 
 pub mod frame;
 pub mod heap;
-pub mod layout;
 pub mod map;
 pub mod paging;
