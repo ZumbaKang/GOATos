@@ -1,9 +1,9 @@
 ---
 name: graphics-and-gui
-description: Guidance for eventually building a graphical UI for GOATos (a pixel-graphics framebuffer, mouse support, and basic windowing) - explicitly a later-stage goal, not a first step. Use this when the user asks for GUI/graphics work, or when starting on a graphics mode framebuffer driver.
+description: Guidance for GOATos graphics (Mode 13h is on; pixel primitives, bitmap font, mouse, and windowing are next). Use this when working on framebuffer/GUI code or changing the boot-time video mode.
 ---
 
-# Graphics and GUI (future work, not a first step)
+# Graphics and GUI
 
 GOATos boots into VGA **Mode 13h** (320x200x256, linear framebuffer at
 `0xA0000`): `boot/boot.asm` calls `INT 10h / AX=0013h` in real mode, and
@@ -13,7 +13,7 @@ until a bitmap font lands, but it is not what QEMU/v86 display. Same idea
 as before - write to a buffer the BIOS/emulator already renders - one level
 up from characters to pixels.
 
-## Suggested order of implementation
+## What is already in place (roadmap 5.1)
 
 1. **Switch to a VGA graphics mode** - **done (roadmap 5.1)**: Mode 13h via
    BIOS in `boot/boot.asm`, solid-color fill in `framebuffer.rs`. Stick
@@ -43,8 +43,7 @@ up from characters to pixels.
   test any new video mode there too, not just in QEMU (see
   `web-demo-packaging`, especially the "boots in QEMU but not in v86"
   debugging process, since video mode support is a plausible place for the
-  two to diverge).
-- This is explicitly a "later" milestone per the project's own roadmap
-  (see the repo README) - don't start it before more foundational pieces
-  (`memory-management`, `interrupts-and-exceptions`) are in place, since
-  graphics/mouse work leans on both.
+  two to diverge). Mode 13h is the conservative choice for that reason.
+- Do not grow `boot/boot.asm` casually - it is still on a 512-byte budget
+  (see `bootloader-and-linking`). Higher modes (VBE) likely need a
+  second-stage loader or a real-mode helper stub, not more MBR bytes.

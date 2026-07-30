@@ -31,6 +31,7 @@ pub mod exceptions;
 pub mod framebuffer;
 pub mod fs;
 pub mod gdt;
+pub mod graphics;
 pub mod idt;
 pub mod input;
 pub mod interrupts;
