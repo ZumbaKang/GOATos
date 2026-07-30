@@ -200,7 +200,15 @@ want `Vec`/`Box`/`String`).
       can't silently overlap as both grow.
       *Done when:* the layout (stack range, heap range) is written down
       somewhere in code (not just in your head), and boot still succeeds.
-- [ ] **2.6 - Guard page below the kernel stack.** Now that paging exists,
+      *Done as:* `kernel/src/memory/layout.rs` documents the address map
+      (64 KiB kernel stack and 4 KiB DF stack inside the reserved kernel
+      image; 1 MiB heap from free frames outside it), exports
+      `KERNEL_STACK_SIZE` / `DOUBLE_FAULT_STACK_SIZE` next to the matching
+      `.skip` in `entry.s`, and runs a boot-time check that the live ranges
+      are sized correctly, nested correctly, and pairwise disjoint. The
+      banner prints the three ranges; `scripts/ci-test.sh` re-parses them
+      and re-derives disjointness itself.
+- [x] **2.6 - Guard page below the kernel stack.** Now that paging exists,
       leave the page below the kernel stack unmapped so an overflow faults
       immediately instead of silently scribbling over whatever `.bss`
       happens to sit underneath. This is what finishes task 1.4: the
@@ -214,6 +222,14 @@ want `Vec`/`Box`/`String`).
       recursion behind a `trigger-stack-overflow` feature) prints the
       double-fault report from 1.4 instead of corrupting memory or
       rebooting.
+      *Done as:* `entry.s` lays out DF stack | 4 KiB guard | 64 KiB kernel
+      stack, page-aligned; `paging::init` identity-maps everything else but
+      leaves that guard PTE not-present; `layout::check` asserts the three
+      ranges are adjacent and that `paging::is_present` says the guard is
+      still unmapped. `KERNEL_FEATURES=trigger-stack-overflow` recurses until
+      `esp` grows into the hole; pushing the #PF frame fails and the CPU
+      escalates to the vector-8 task gate, printing the double-fault report
+      on the private stack.
 
 ---
 
@@ -224,7 +240,7 @@ phase is really two new drivers, following that skill's conventions)
 
 Needs Phase 1 (interrupts) done first.
 
-- [ ] **3.0 - Make printing safe from interrupt context.** `vga::_print` and
+- [x] **3.0 - Make printing safe from interrupt context.** `vga::_print` and
       `serial::_print` take a spin lock, so a handler that prints while the
       interrupted code held that lock deadlocks instead of printing - and every
       handler in the kernel prints. Nothing can hit this today (no IRQ line is
@@ -235,24 +251,51 @@ Needs Phase 1 (interrupts) done first.
       *Done when:* a handler that fires while a print is in progress reports
       instead of hanging - verified deliberately, e.g. by raising an interrupt
       from inside a print behind a `trigger-*` feature.
-- [ ] **3.1 - PIT (timer) driver.** Program the 8253/8254 PIT to a fixed
+      *Done as:* both writers sit behind `sync::IrqMutex`, which `cli`s for the
+      critical section (so a maskable IRQ never observes the lock as held) and,
+      if something that ignores IF re-enters anyway, still runs the closure
+      rather than spinning - the interrupted holder is suspended on this CPU.
+      `KERNEL_FEATURES=trigger-print-reentrancy` holds both locks and fires
+      `int $0x60`; the catch-all's report lands and the kernel prints
+      `print reentrancy ok` afterwards.
+- [x] **3.1 - PIT (timer) driver.** Program the 8253/8254 PIT to a fixed
       frequency, add an IRQ0 handler that increments a tick counter.
       *Done when:* the kernel can print an increasing tick count (e.g.
       once a second) over serial, proving interrupts are actually firing.
-- [ ] **3.2 - PS/2 keyboard driver.** Add an IRQ1 handler that reads
+      *Done as:* `kernel/src/pit.rs` programs channel 0 for 100 Hz (mode 3),
+      installs an IRQ0 handler that bumps an `AtomicU32` and EOIs, and
+      `pic::unmask(0)` lets the line through. The idle loop wakes on each tick
+      and prints `PIT: tick N (S s)` once a second over VGA + serial;
+      `scripts/ci-test.sh` checks the banner and that at least two successive
+      reports show a strictly increasing counter.
+- [x] **3.2 - PS/2 keyboard driver.** Add an IRQ1 handler that reads
       scancodes from the keyboard controller and translates a basic US
       layout (letters, digits, space, enter, backspace) to ASCII.
       *Done when:* typing on the keyboard echoes the corresponding
       characters onto the VGA screen. Test in v86 too - it forwards real
       browser keyboard events into the emulated PS/2 controller, so this
       is a good one to verify "for real" in the web demo, not just QEMU.
-- [ ] **3.3 - Input event queue.** A small fixed-size ring buffer (no heap
+      *Done as:* `kernel/src/keyboard.rs` installs an IRQ1 handler that
+      reads scancode set 1 from the 8042 data port, tracks Shift, translates
+      letters/digits/space/enter/backspace, and echoes to VGA + serial
+      (backspace via `vga::backspace`). `pic::unmask(1)` leaves IMR at
+      `0xfc/0xff`. Verified with QEMU monitor `sendkey` (typed text appears
+      on the VGA screendump and in the serial log) and against the v86 web
+      demo.
+- [x] **3.3 - Input event queue.** A small fixed-size ring buffer (no heap
       needed, or backed by the new allocator if Phase 2 is done) that
       decouples "a key was pressed" (interrupt context) from "something
       reads and acts on it" (normal code).
       *Done when:* a simple loop in `kernel_main` can drain the queue and
       echo typed characters, with no dropped/duplicated keys under normal
       typing speed.
+      *Done as:* `kernel/src/input.rs` is a 64-slot ring buffer behind
+      `IrqMutex`. The IRQ1 handler only translates and `push`es; the idle
+      loop `pop`s and echoes to VGA + serial. A full queue drops the newest
+      event (never blocks the handler) and counts drops. Verified with QEMU
+      monitor `sendkey` (typed text appears on the VGA screendump and in the
+      serial log with no missing/duplicated characters) and against the v86
+      web demo.
 
 ---
 
@@ -267,33 +310,73 @@ is *not* required for a first shell - `help`/`echo`/`clear`-style built-ins
 don't need one - so it's tracked as its own optional phase (4.5 below)
 rather than blocking this one.
 
-- [ ] **4.1 - Line editor.** Build a simple input line buffer on top of the
+- [x] **4.1 - Line editor.** Build a simple input line buffer on top of the
       Phase 3 keyboard queue: typed characters append to a line, backspace
       removes the last one, enter submits it.
       *Done when:* you can type a line, backspace to fix a typo, and press
       enter to see the whole line echoed back.
-- [ ] **4.2 - Built-in commands.** A small command dispatcher with a
+      *Done as:* `kernel/src/shell.rs` holds a 72-byte line buffer. The idle
+      loop drains the Phase 3 input queue into it: printable characters append
+      and echo, backspace pops and erases (VGA + serial `\x08 \x08`), and
+      enter submits - printing the whole line back, clearing the buffer, and
+      showing a fresh `> ` prompt. Verified with QEMU monitor `sendkey`
+      (typo + backspace + enter yields the corrected line on the VGA
+      screendump and in the serial log) and against the v86 web demo.
+- [x] **4.2 - Built-in commands.** A small command dispatcher with a
       handful of built-ins: `help` (list commands), `clear` (clear the VGA
       screen), `echo <text>`, `about` (prints the GOATos banner/version).
       *Done when:* each built-in works as expected from the prompt, and an
       unrecognized command prints a friendly "unknown command" instead of
       doing nothing or crashing.
-- [ ] **4.3 - Cooperative tasks.** Give each "task" (to start: just the
+      *Done as:* `shell::run_line` splits the submitted buffer on the first
+      whitespace word and dispatches `help` / `clear` / `echo` / `about`;
+      anything else prints `unknown command: <name>`. Empty lines are a
+      no-op (fresh prompt only). `clear` wipes VGA via `vga::clear_screen`
+      and marks the serial log with `(screen cleared)`. Verified with QEMU
+      monitor `sendkey` for each built-in plus an unknown command (VGA
+      screendump + serial), and against the v86 web demo.
+- [x] **4.3 - Cooperative tasks.** Give each "task" (to start: just the
       shell and maybe one background counter/demo task) its own stack and
       a hand-written context switch (save/restore registers including
       `esp`) that runs on an explicit `yield`, not a timer yet.
       *Done when:* two cooperative tasks (e.g. the shell + a task that
       prints a counter) visibly interleave their output.
-- [ ] **4.4 - Round-robin scheduler.** A minimal ready-queue that decides
+      *Done as:* `kernel/src/task/` parks callee-saved regs + `esp` in
+      `switch.s` (`context_switch`); task 0 is the shell on the existing
+      kernel stack, task 1 is a heap-stack demo counter spawned at boot.
+      Each loop calls `task::yield_now` (explicit only - no preemption).
+      The shell's once-a-second PIT line and the demo's `Task: demo counter N`
+      interleave on serial; the demo also prints on VGA. `scripts/ci-test.sh`
+      checks the banner and that the counter advances at least twice.
+- [x] **4.4 - Round-robin scheduler.** A minimal ready-queue that decides
       which task runs next after a yield.
       *Done when:* 3+ tasks round-robin fairly (each gets roughly equal
       turns) over a short run.
-- [ ] **4.5 - (optional, needs filesystem) Load & run from disk.** Once a
+      *Done as:* `kernel/src/task/` keeps a FIFO ready queue of task ids
+      (the running task is not in it). `yield_now` pushes the current task
+      onto the tail and pops the head; `spawn` enqueues the new task ready.
+      Boot spawns shell + two demo counters (3 tasks). Each successful
+      switch-in bumps a per-task turn counter; once a second the shell prints
+      `Scheduler: turns [0]=N [1]=M [2]=P` and the demos print their own
+      counters. `scripts/ci-test.sh` checks the banner, that both demos
+      advance, and that the last turn triple has spread ≤ 1.
+- [x] **4.5 - (optional, needs filesystem) Load & run from disk.** Once a
       basic filesystem exists (see its own skill), extend the shell with a
       command that reads a file's contents (e.g. `cat <file>`) - the first
       real use of on-disk storage beyond booting.
       *Done when:* `cat`-ing a known test file placed on the disk image
       prints its exact contents.
+      *Done as:* `kernel/src/ata.rs` is a polling PIO driver for the primary
+      ATA master (28-bit LBA reads, bounded spins, soft-fail if missing).
+      `kernel/src/fs.rs` mounts a tiny custom "GOATFS" image at fixed LBA
+      2048 (past the boot sector + kernel); `scripts/build-goatfs.py` packs
+      it and the Makefile `dd`s it into `build/disk.img`. Boot mounts the
+      FS, self-tests by reading `hello.txt`, and echoes
+      `GOATos says hello from disk!`; the shell gains a `cat <file>` built-in
+      that does the same. The keyboard layout also gained `.`/`-`/`_` so
+      filenames with extensions are typeable. `scripts/ci-test.sh` greps the
+      ATA/FS banners, the self-test verdict, and the exact file contents;
+      verified under QEMU (boot + `sendkey` `cat hello.txt`) and v86.
 
 ---
 
@@ -305,11 +388,20 @@ Explicitly the last phase in this list - don't start it before Phases 1-2
 are done, since mouse input (via interrupts) and any nontrivial rendering
 work both lean on them.
 
-- [ ] **5.1 - Switch to a graphics mode.** Have `boot.asm` set a VGA (or
+- [x] **5.1 - Switch to a graphics mode.** Have `boot.asm` set a VGA (or
       VBE) graphics mode via a real-mode BIOS call before the protected-mode
       switch (the kernel itself has no BIOS access after that point).
       *Done when:* the screen is a solid, known color instead of the text
       console - proving mode-setting worked, in both QEMU and v86.
+      *Done as:* `boot/boot.asm` programs VGA Mode 13h (`INT 10h` / `AH=00`,
+      `AL=13h`) after the kernel is loaded and before the protected-mode
+      switch - five bytes, absorbed by the existing GDT `align 8` slack so
+      the 512-byte sector still fits. `kernel/src/graphics.rs` fills the
+      320×200 framebuffer at `0xA0000` with DAC index 1 (palette blue) as
+      the first thing `kernel_main` does; serial reports
+      `Graphics: VGA mode 0x13 320x200 @ 0x000a0000, fill color 1 (solid)`.
+      Verified with a QEMU screendump (solid blue, not text) and the v86
+      web demo canvas.
 - [ ] **5.2 - Pixel primitives.** A new `kernel/src/framebuffer.rs` with
       `set_pixel`, `fill_rect`, and `draw_line` over the graphics-mode
       buffer.

@@ -40,6 +40,14 @@ trigger-unhandled-exception = []
 # attribute to any IRQ: the handler must recognise it from the in-service
 # register and *not* acknowledge it.
 trigger-spurious-irq = []
+# Overflows the kernel stack (infinite recursion) so `esp` grows into the
+# unmapped guard page below it; the resulting page fault cannot push a frame
+# and escalates to a double fault on the private stack (roadmap 2.6).
+trigger-stack-overflow = []
+# Raises a software interrupt while both print locks are held, so the
+# catch-all's report has to take the IrqMutex re-entry path instead of
+# deadlocking (roadmap 3.0).
+trigger-print-reentrancy = []
 
 [profile.dev]
 panic = "abort"

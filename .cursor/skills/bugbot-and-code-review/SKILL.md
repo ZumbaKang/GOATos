@@ -22,8 +22,14 @@ ever merging a PR:
 - **Important gotcha**: Bugbot's check conclusion defaults to `neutral` when
   it finds issues, *not* `failure` - so simply requiring the check via
   GitHub branch protection would not actually block a merge. This script
-  treats anything other than `success` as blocking, regardless of the
-  literal conclusion string.
+  treats a completed non-`success` conclusion as blocking *when Bugbot
+  actually reviewed*, regardless of the literal conclusion string.
+- **Also fail-open when Bugbot never reviewed.** A usage/spend-limit (or
+  similar) failure still posts a completed check with conclusion `neutral`
+  and an `output.title` of `Error` / text like "couldn't run - usage limit
+  reached". That is *not* a finding - treating it as one strands every PR
+  until a human raises the quota. The script detects that shape and
+  proceeds, same as when the check never appears.
 - If found and blocking, the merge is skipped and a comment explaining why
   is posted on the PR (see the `auto-merge` job's "Comment if blocked by
   Bugbot" step).

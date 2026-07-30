@@ -18,9 +18,17 @@ and a "hello world" on screen.
       double fault on a stack of its own, via a TSS and task gate), both 8259
       PICs remapped clear of the exception vectors, and interrupts enabled with
       a catch-all for any vector nothing owns yet.
-- [ ] Physical & virtual memory management (paging, a heap allocator)
-- [ ] Keyboard input
-- [ ] A minimal shell
+- [x] **Physical & virtual memory management**: BIOS E820 memory map, a
+      physical frame allocator, identity-mapped paging, a kernel heap with
+      `#[global_allocator]`/`alloc`, and an unmapped guard page below the
+      kernel stack so overflow double-faults instead of corrupting memory.
+- [x] Keyboard input (PIT timer + PS/2 keyboard on IRQ0/IRQ1, input event
+      queue decoupling the IRQ handler from consumers)
+- [x] **A minimal shell**: line editor on the keyboard queue, built-ins
+      (`help`/`clear`/`echo`/`about`/`cat`), a cooperative round-robin
+      scheduler (FIFO ready queue, explicit yield) with 3+ fair tasks, and
+      a tiny on-disk filesystem (ATA PIO + GOATFS) so `cat` reads real files
+      from the disk image.
 - [ ] Graphics mode + a basic GUI
 - [ ] ...and much more, one step at a time.
 

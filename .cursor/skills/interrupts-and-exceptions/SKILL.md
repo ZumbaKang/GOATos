@@ -63,30 +63,32 @@ that follow from this and are easy to get wrong:
   `extern "x86-interrupt"` handler: it is a task entry point, so there is no
   interrupt frame on the stack (read the interrupted state from the main TSS
   via `tss::interrupted_state()`) and no `iret` to emit.
-- Both TSSes carry a `cr3` that the CPU loads on the switch. It is 0 today
-  because paging is off; **when paging lands it must become the kernel's real
-  page directory.**
+- Both TSSes carry a `cr3` that the CPU loads on the switch.
+  `tss::set_page_directory` writes the real directory once paging is on;
+  leaving it at 0 would triple-fault the handler.
 
 ### Provoking a real double fault
 
 A kernel cannot raise #8 directly - it is what the CPU reports when it fails to
-deliver *another* exception. `trigger-double-fault` manufactures exactly that:
-`idt::clear_handler(0)` then a divide by zero, so delivery of #DE raises #GP,
-and two contributory exceptions in a row *are* the definition of a double
-fault.
+deliver *another* exception. Two features cover the two shapes:
 
-The textbook cause, a stack overflow, cannot be provoked yet: with no paging
-there is no guard page below the kernel stack, and segment limits (the only
-other way to bound a stack) **are not enforced by QEMU's TCG emulation** -
-verified directly, an out-of-range write through a deliberately bounded
-expand-down segment silently succeeds. So an overflow corrupts memory rather
-than faulting; roadmap task 2.6 closes that once paging exists.
+- `trigger-double-fault` manufactures a "fault during delivery":
+  `idt::clear_handler(0)` then a divide by zero, so delivery of #DE raises #GP,
+  and two contributory exceptions in a row *are* the definition of a double
+  fault. Does not depend on paging.
+- `trigger-stack-overflow` is the textbook cause: infinite recursion grows
+  `esp` into the unmapped guard page below the kernel stack (roadmap 2.6).
+  Pushing the #PF frame fails, and the CPU escalates to the vector-8 task gate.
+  Segment limits cannot substitute for that guard - QEMU's TCG (and v86) do
+  not enforce them.
 
 **v86 does not implement the escalation at all** - it aborts the whole emulator
 with `panicked at src/rust/cpu/cpu.rs: Unimplemented: #GP handler`. It *does*
 implement 32-bit hardware task switching, so `trigger-double-fault-gate`
 (a plain `int $8` through the same gate) is what proves the switch and the
-private stack in the browser demo, with output identical to QEMU's.
+private stack in the browser demo, with output identical to QEMU's. Do not
+expect `trigger-stack-overflow` / `trigger-double-fault` to print cleanly
+under v86.
 
 ## The PIC remap, and why the mask matters
 

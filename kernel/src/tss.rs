@@ -154,32 +154,13 @@ unsafe impl Sync for TssCell {}
 static MAIN_TSS: TssCell = TssCell(UnsafeCell::new(TaskStateSegment::EMPTY));
 static DOUBLE_FAULT_TSS: TssCell = TssCell(UnsafeCell::new(TaskStateSegment::EMPTY));
 
-/// The double-fault handler's private stack.
-///
-/// 4 KiB is plenty: the handler formats one report and halts. It is separate
-/// from the kernel stack in `entry.s` on purpose - the whole point is to
-/// survive a fault whose cause is the interrupted stack itself.
-///
-/// Both stacks are `.bss` objects, though, and the linker is free to place
-/// this one immediately below the kernel stack - so a *runaway* overflow can
-/// still reach it, since nothing stops one yet. Roadmap task 2.6 (a guard page,
-/// once paging exists) is what fixes that, by faulting before the overflow gets
-/// this far.
-const DOUBLE_FAULT_STACK_SIZE: usize = 4096;
-
-/// 16-byte aligned so the handler's initial `esp` matches what the compiler
-/// assumes about stack alignment at a function's entry.
-#[repr(C, align(16))]
-struct Stack([u8; DOUBLE_FAULT_STACK_SIZE]);
-
-struct StackCell(UnsafeCell<Stack>);
-
-// SAFETY: only ever used as the double-fault task's stack, i.e. touched by
-// exactly one CPU running exactly one handler, and never read as data.
-unsafe impl Sync for StackCell {}
-
-static DOUBLE_FAULT_STACK: StackCell =
-    StackCell(UnsafeCell::new(Stack([0; DOUBLE_FAULT_STACK_SIZE])));
+// Laid out in `entry.s` immediately below the unmapped stack guard page, so a
+// runaway kernel-stack overflow faults before it can reach this region. Only
+// the addresses matter here - the bytes themselves are never read as data.
+extern "C" {
+    static double_fault_stack_bottom: u8;
+    static double_fault_stack_top: u8;
+}
 
 /// Where a TSS lives and how big it is - what [`crate::gdt`] needs to build a
 /// descriptor for it.
@@ -266,8 +247,11 @@ pub fn set_page_directory(cr3: u32) {
 /// Printing this next to the `esp` the handler actually runs on is what proves
 /// the stack switch happened.
 pub fn double_fault_stack_range() -> (u32, u32) {
-    let bottom = DOUBLE_FAULT_STACK.0.get() as u32;
-    (bottom, bottom + DOUBLE_FAULT_STACK_SIZE as u32)
+    // Only the addresses of these assembly symbols are taken - they name
+    // objects that exist for the life of the kernel.
+    let bottom = core::ptr::addr_of!(double_fault_stack_bottom) as u32;
+    let top = core::ptr::addr_of!(double_fault_stack_top) as u32;
+    (bottom, top)
 }
 
 fn stack_top() -> u32 {

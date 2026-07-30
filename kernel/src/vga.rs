@@ -7,7 +7,8 @@
 
 use core::fmt;
 use core::ptr;
-use spin::Mutex;
+
+use crate::sync::IrqMutex;
 
 const BUFFER_ADDR: usize = 0xb8000;
 const BUFFER_WIDTH: usize = 80;
@@ -138,7 +139,10 @@ impl fmt::Write for Writer {
     }
 }
 
-static WRITER: Mutex<Writer> = Mutex::new(Writer {
+/// Protected by [`IrqMutex`] so an interrupt handler that prints while the
+/// interrupted code was mid-print reports instead of deadlocking on a spin
+/// lock (roadmap 3.0).
+static WRITER: IrqMutex<Writer> = IrqMutex::new(Writer {
     column: 0,
     row: 0,
     color_code: ColorCode::new(Color::White, Color::Black),
@@ -146,21 +150,53 @@ static WRITER: Mutex<Writer> = Mutex::new(Writer {
 
 /// Clears the whole screen and resets the cursor to the top-left corner.
 pub fn clear_screen() {
-    let mut writer = WRITER.lock();
-    for row in 0..BUFFER_HEIGHT {
-        writer.clear_row(row);
-    }
-    writer.row = 0;
-    writer.column = 0;
+    WRITER.with(|writer| {
+        for row in 0..BUFFER_HEIGHT {
+            writer.clear_row(row);
+        }
+        writer.row = 0;
+        writer.column = 0;
+    });
+}
+
+/// Erases the character left of the cursor and moves the cursor back one
+/// column. No-op at column 0 (does not wrap onto the previous row) - enough
+/// for the keyboard driver's basic echo; a real line editor can do better.
+pub fn backspace() {
+    WRITER.with(|writer| {
+        if writer.column == 0 {
+            return;
+        }
+        writer.column -= 1;
+        writer.put_char(
+            writer.row,
+            writer.column,
+            ScreenChar {
+                ascii_character: b' ',
+                color_code: writer.color_code,
+            },
+        );
+    });
 }
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     use core::fmt::Write;
-    WRITER
-        .lock()
-        .write_fmt(args)
-        .expect("writing to VGA buffer failed");
+    WRITER.with(|writer| {
+        writer
+            .write_fmt(args)
+            .expect("writing to VGA buffer failed");
+    });
+}
+
+/// Runs `f` while the VGA writer lock is held.
+///
+/// Used by the print-reentrancy self-test to raise an interrupt from inside a
+/// critical section; ordinary callers should use [`vga_print!`] /
+/// [`vga_println!`] instead.
+#[doc(hidden)]
+pub fn with_lock_held<R>(f: impl FnOnce() -> R) -> R {
+    WRITER.with(|_| f())
 }
 
 /// Prints to the VGA text-mode screen, without a trailing newline.

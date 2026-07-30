@@ -60,8 +60,8 @@ tasks.
      list of reservations: the IVT/BDA plus the E820 handoff block
      (0x0-0x1000), the boot sector's page (0x7000), the kernel image
      (`__kernel_start`/`__kernel_end`, two symbols `linker.ld` exports - they
-     span `.bss`, so the 64KiB kernel stack and the double-fault stack are
-     both inside), and 0xa0000-0x100000. **Anything new that claims a fixed
+     span `.bss`, so the DF stack, guard page, and 64KiB kernel stack are
+     all inside), and 0xa0000-0x100000. **Anything new that claims a fixed
      physical address must be added there**, or the allocator will hand it to
      someone else.
    - Addresses above the 4GiB line are dropped, since this CPU cannot reach

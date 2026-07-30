@@ -9,9 +9,10 @@
 
 use core::fmt::Write;
 use core::hint;
-use spin::Mutex;
 use uart_16550::backend::PioBackend;
 use uart_16550::{ByteSendError, Config, Uart16550};
+
+use crate::sync::IrqMutex;
 
 const COM1_PORT: u16 = 0x3f8;
 
@@ -24,7 +25,10 @@ const COM1_PORT: u16 = 0x3f8;
 /// a debug print into a hang.
 const TRANSMIT_SPIN_LIMIT: u32 = 1_000_000;
 
-static SERIAL1: Mutex<Option<Uart16550<PioBackend>>> = Mutex::new(None);
+/// Protected by [`IrqMutex`] so a handler that prints while this lock is held
+/// (e.g. an IRQ mid-serial-write) reports instead of deadlocking - same
+/// contract as the VGA writer (roadmap 3.0).
+static SERIAL1: IrqMutex<Option<Uart16550<PioBackend>>> = IrqMutex::new(None);
 
 /// Initializes the COM1 serial port. Safe to call even if no serial port is
 /// actually present/emulated: if setup fails, `serial_print!`/`serial_println!`
@@ -43,7 +47,7 @@ pub fn init() {
     if uart.init(Config::default()).is_err() {
         return;
     }
-    *SERIAL1.lock() = Some(uart);
+    SERIAL1.with(|slot| *slot = Some(uart));
 }
 
 /// Writes as much of `bytes` as the UART will take, dropping the rest rather
@@ -85,20 +89,34 @@ fn send(uart: &mut Uart16550<PioBackend>, bytes: &[u8]) {
     }
 }
 
-struct SerialWriter;
-
-impl Write for SerialWriter {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        if let Some(uart) = SERIAL1.lock().as_mut() {
-            send(uart, s.as_bytes());
-        }
-        Ok(())
-    }
-}
-
 #[doc(hidden)]
 pub fn _print(args: core::fmt::Arguments) {
-    let _ = SerialWriter.write_fmt(args);
+    SERIAL1.with(|slot| {
+        if let Some(uart) = slot.as_mut() {
+            let mut writer = UartWriter { uart };
+            let _ = writer.write_fmt(args);
+        }
+    });
+}
+
+/// Runs `f` while the serial-port lock is held.
+///
+/// Counterpart of [`crate::vga::with_lock_held`] for the print-reentrancy
+/// self-test.
+#[doc(hidden)]
+pub fn with_lock_held<R>(f: impl FnOnce() -> R) -> R {
+    SERIAL1.with(|_| f())
+}
+
+struct UartWriter<'a> {
+    uart: &'a mut Uart16550<PioBackend>,
+}
+
+impl Write for UartWriter<'_> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        send(self.uart, s.as_bytes());
+        Ok(())
+    }
 }
 
 /// Prints to the host through the serial interface, without a trailing newline.

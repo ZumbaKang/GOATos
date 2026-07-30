@@ -9,8 +9,8 @@ SECTIONS {
     /* The physical extent of the loaded kernel, for the frame allocator to
      * exclude from the memory it hands out. __kernel_end is past .bss, which
      * is *not* part of the flat binary (objcopy emits nothing for NOBITS) but
-     * is very much part of what the kernel occupies in RAM - the 64KiB stack
-     * from entry.s lives there. */
+     * is very much part of what the kernel occupies in RAM - the DF stack,
+     * stack guard page, and 64KiB kernel stack from entry.s live there. */
     __kernel_start = .;
 
     .text :

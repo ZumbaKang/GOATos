@@ -27,13 +27,22 @@ use core::alloc::Layout;
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 
+pub mod ata;
 pub mod exceptions;
+pub mod fs;
 pub mod gdt;
+pub mod graphics;
 pub mod idt;
+pub mod input;
 pub mod interrupts;
+pub mod keyboard;
 pub mod memory;
 pub mod pic;
+pub mod pit;
 pub mod serial;
+pub mod shell;
+pub mod sync;
+pub mod task;
 pub mod tss;
 pub mod vga;
 
@@ -41,22 +50,28 @@ global_asm!(include_str!("entry.s"), options(att_syntax));
 
 #[no_mangle]
 pub extern "C" fn kernel_main() -> ! {
-    // VGA is the primary, load-bearing output surface (it's what makes
-    // GOATos "displayable" both on real hardware and via v86 in a browser),
-    // so it comes first and never depends on the serial port succeeding.
+    // Graphics mode is the primary, load-bearing display surface now: the
+    // bootloader already switched to VGA Mode 13h (see `boot/boot.asm`), so
+    // paint a solid known color before anything else. A botched mode-set
+    // shows up as "not this color" on a screendump; serial still carries the
+    // textual proof for headless CI.
+    let graphics = graphics::init();
+
+    // The text-mode buffer at 0xb8000 is no longer what the hardware shows,
+    // but keep writing it for now: serial is what CI reads, and later GUI
+    // tasks (bitmap font, etc.) will replace this path deliberately.
     vga::clear_screen();
     vga_println!("GOATos");
     vga_println!("------");
     vga_println!("Booted successfully via a from-scratch bootloader.");
-    vga_println!("This screen is the same VGA text buffer real BIOS");
-    vga_println!("hardware (and browser emulators like v86) render -");
-    vga_println!("what you see here is what a web visitor would see.");
+    vga_println!("{}", graphics);
 
     // Serial output is best-effort: useful for headless QEMU/CI, but its
     // absence must never affect anything above. It comes up before the
     // subsystems below so that a fault in any of them still has a headless
     // surface to report itself on (see `exceptions`).
     serial::init();
+    serial_println!("{}", graphics);
 
     // Take over segmentation from the bootloader's throwaway GDT. Printing
     // first means a botched GDT load shows up as "the banner is on screen but
@@ -254,24 +269,171 @@ pub extern "C" fn kernel_main() -> ! {
 
     serial_println!("GOATos booted successfully! (32-bit, from a hand-written bootloader)");
 
-    // Both compile to nothing unless a `trigger-*` feature is enabled, which is
-    // how the handlers above get verified against a real exception and a real
-    // unexpected interrupt.
+    // Compile to nothing unless a `trigger-*` feature is enabled, which is how
+    // the handlers / print path above get verified against a real exception, a
+    // real unexpected interrupt, or a real mid-print re-entry. Runs *before*
+    // the PIT unmasks IRQ0, so a timer tick cannot interleave with a deliberate
+    // fault/re-entry probe.
     exceptions::trigger_debug_exception();
     interrupts::trigger_debug_interrupt();
+    interrupts::trigger_print_reentrancy();
 
-    // With every IRQ line masked there is nothing left to wake the CPU, so this
-    // is where the kernel stays: idle in `hlt`, ready to report anything that
-    // arrives anyway.
-    hlt_loop();
+    // First real IRQ line: program the PIT, replace the catch-all on its
+    // vector, and unmask IRQ0. The masks reported just above were still
+    // 0xff/0xff; this is what changes that.
+    pit::init();
+    let pic = pic::state();
+    diag_println!(
+        "PIT: channel 0 at {} Hz (IRQ0 -> vector {}, divisor {}), IMR {:#04x}/{:#04x}",
+        pit::FREQUENCY_HZ,
+        pit::VECTOR,
+        pit::DIVISOR,
+        pic.master_mask,
+        pic.slave_mask
+    );
+
+    // Second real IRQ line: PS/2 keyboard on IRQ1. The handler only enqueues
+    // translated keys; the idle loop below drains them into the line editor.
+    keyboard::init();
+    let pic = pic::state();
+    diag_println!(
+        "Keyboard: PS/2 on IRQ1 -> vector {}, IMR {:#04x}/{:#04x}",
+        keyboard::VECTOR,
+        pic.master_mask,
+        pic.slave_mask
+    );
+    diag_println!(
+        "Input: {}-event ring buffer (IRQ pushes, idle loop drains)",
+        input::CAPACITY
+    );
+
+    // Disk + tiny on-disk filesystem (roadmap 4.5): ATA PIO reads of the
+    // GOATFS image planted at a fixed LBA past the kernel. Mount + self-test
+    // happen before the shell prompt so `cat hello.txt` is ready immediately.
+    ata::init();
+    let ata_state = if ata::is_present() {
+        "primary master ready"
+    } else {
+        "primary master missing"
+    };
+    diag_println!("ATA: PIO {}", ata_state);
+    let fs_banner = fs::init();
+    diag_println!("{}", fs_banner);
+    let fs_test = fs::self_test();
+    diag_println!("{}", fs_test);
+    // Echo the known file the same way `cat hello.txt` will, so CI can grep
+    // the exact on-disk contents without driving the keyboard.
+    if fs_test.ok {
+        let mut buf = [0u8; fs::MAX_FILE_SIZE];
+        if let Ok(n) = fs::read_file(fs::HELLO_TXT_NAME, &mut buf) {
+            if let Ok(text) = core::str::from_utf8(&buf[..n]) {
+                diag_println!("FS: cat {} =>", fs::HELLO_TXT_NAME);
+                // File includes its own trailing newline.
+                vga_print!("{}", text);
+                serial_print!("{}", text);
+            }
+        }
+    }
+
+    // Shell on top of that queue: line editor + built-in commands (roadmap
+    // 4.1 / 4.2 / 4.5). Banner first so the prompt is the last thing on screen,
+    // ready for typing.
+    diag_println!(
+        "Shell: line editor ({} chars) + builtins (help/clear/echo/about/cat)",
+        shell::LINE_CAPACITY
+    );
+
+    // Round-robin scheduler (roadmap 4.4): this context becomes the shell
+    // task; two demo counters share a FIFO ready queue so three tasks take
+    // equal turns. Yields are still explicit - no timer preemption yet.
+    task::init();
+    let demo_a = task::spawn(demo_a_task).expect("demo-a task slot");
+    let demo_b = task::spawn(demo_b_task).expect("demo-b task slot");
+    diag_println!(
+        "Tasks: round-robin ready-queue ({} tasks, shell + demo-a {} + demo-b {})",
+        task::count(),
+        demo_a,
+        demo_b
+    );
+
+    shell::init();
+
+    // Shell task: drain typed keys, report PIT ticks / turn counts, yield
+    // into the ready queue, then sleep until the next IRQ wakes us.
+    shell_task();
 }
 
-/// Parks the CPU for good, waking only to halt again. Used both for a normal
-/// end of `kernel_main` and by an exception handler that has finished
-/// reporting.
+/// Parks the CPU for good, waking only to halt again. Used by an exception
+/// handler that has finished reporting (and by any path that must stop cold).
 pub fn hlt_loop() -> ! {
     loop {
         unsafe { asm!("hlt") };
+    }
+}
+
+/// Shell cooperative task (task 0): line editor + once-a-second PIT / RR report.
+///
+/// After each pass it [`task::yield_now`]s into the ready queue (so the demo
+/// tasks run), then `hlt`s until the next IRQ. The PIT wake is what starts
+/// the next round-robin pass.
+fn shell_task() -> ! {
+    let mut editor = shell::LineEditor::new();
+    let mut last_second = 0u32;
+    loop {
+        shell::drain_input(&mut editor);
+
+        let second = pit::seconds();
+        if second > last_second {
+            last_second = second;
+            // Serial only: CI greps these lines, and printing them on VGA would
+            // land mid-edit whenever a second boundary falls between keystrokes.
+            serial_println!("PIT: tick {} ({} s)", pit::ticks(), second);
+            // Fairness proof for roadmap 4.4: after a short run the three
+            // turn counts stay within one of each other (shell + two demos).
+            serial_println!(
+                "Scheduler: turns [0]={} [1]={} [2]={}",
+                task::turns(0),
+                task::turns(1),
+                task::turns(2)
+            );
+        }
+        task::yield_now();
+        // SAFETY: waking on the next IRQ is the idle path; the PIT handler
+        // will return here so we can yield into the ready queue again.
+        unsafe { asm!("hlt") };
+    }
+}
+
+/// Background demo task A: once-a-second counter, then yield.
+fn demo_a_task() -> ! {
+    demo_counter_task(1)
+}
+
+/// Background demo task B: once-a-second counter, then yield.
+fn demo_b_task() -> ! {
+    demo_counter_task(2)
+}
+
+/// Shared body for the two demo tasks. Together with [`shell_task`] this is
+/// the roadmap 4.4 "3+ tasks round-robin fairly" proof: each yield parks at
+/// the ready-queue tail, so the three tasks take equal turns.
+fn demo_counter_task(label: u32) -> ! {
+    let mut last_second = 0u32;
+    let mut count = 0u32;
+    loop {
+        let second = pit::seconds();
+        if second > last_second {
+            last_second = second;
+            count = count.saturating_add(1);
+            let id = task::current();
+            diag_println!(
+                "Task: demo-{} counter {} (turns {})",
+                label,
+                count,
+                task::turns(id)
+            );
+        }
+        task::yield_now();
     }
 }
 
