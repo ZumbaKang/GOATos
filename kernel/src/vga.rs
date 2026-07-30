@@ -1,9 +1,10 @@
 //! Minimal VGA text-mode (0xB8000) driver.
 //!
-//! This is GOATos's "displayable" output surface: real BIOS/QEMU render this
-//! buffer as text on a monitor, and browser-based x86 emulators (e.g. v86)
-//! render the exact same buffer to a `<canvas>` - which is what lets GOATos
-//! be shown on a web page with no extra work on our end.
+//! The bootloader puts the hardware into Mode 13h graphics before jumping to
+//! the kernel, so this buffer is **not** what the monitor shows anymore -
+//! [`crate::framebuffer`] owns the on-screen pixels. Bring-up banners and the
+//! shell still write here until a bitmap font lands (roadmap 5.3); serial
+//! mirrors those lines for headless CI.
 
 use core::fmt;
 use core::ptr;

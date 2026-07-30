@@ -393,15 +393,13 @@ work both lean on them.
       switch (the kernel itself has no BIOS access after that point).
       *Done when:* the screen is a solid, known color instead of the text
       console - proving mode-setting worked, in both QEMU and v86.
-      *Done as:* `boot/boot.asm` programs VGA Mode 13h (`INT 10h` / `AH=00`,
-      `AL=13h`) after the kernel is loaded and before the protected-mode
-      switch - five bytes, absorbed by the existing GDT `align 8` slack so
-      the 512-byte sector still fits. `kernel/src/graphics.rs` fills the
-      320×200 framebuffer at `0xA0000` with DAC index 1 (palette blue) as
-      the first thing `kernel_main` does; serial reports
-      `Graphics: VGA mode 0x13 320x200 @ 0x000a0000, fill color 1 (solid)`.
-      Verified with a QEMU screendump (solid blue, not text) and the v86
-      web demo canvas.
+      *Done as:* `boot/boot.asm` calls `INT 10h / AX=0013h` (VGA mode 13h,
+      320x200x256 at `0xA0000`) after A20 and before the protected-mode
+      switch. `kernel/src/framebuffer.rs` fills that buffer with palette
+      index `0x01` (default DAC dark blue). Serial banner
+      `Framebuffer: VGA mode 0x13 320x200x256 at 0xa0000, solid fill 0x01`
+      is grepped by CI; QEMU screendump + v86 canvas confirm the solid
+      blue screen (text-mode 0xB8000 is no longer displayed).
 - [ ] **5.2 - Pixel primitives.** A new `kernel/src/framebuffer.rs` with
       `set_pixel`, `fill_rect`, and `draw_line` over the graphics-mode
       buffer.

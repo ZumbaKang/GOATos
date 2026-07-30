@@ -5,28 +5,25 @@ description: Guidance for GOATos graphics (Mode 13h is on; pixel primitives, bit
 
 # Graphics and GUI
 
-GOATos boots into VGA **Mode 13h** (320×200, 256-color, framebuffer at
-`0xA0000`): `boot/boot.asm` sets it via BIOS `INT 10h` before the
-protected-mode switch, and `kernel/src/graphics.rs` fills it solid as the
-first thing `kernel_main` does (roadmap 5.1). The old text-mode driver
-(`kernel/src/vga.rs`, `0xB8000`) still runs for serial-mirrored banners and
-the shell, but the hardware (and v86 canvas) no longer shows it - that is
-intentional until a bitmap font (5.3) restores on-screen text.
+GOATos boots into VGA **Mode 13h** (320x200x256, linear framebuffer at
+`0xA0000`): `boot/boot.asm` calls `INT 10h / AX=0013h` in real mode, and
+`kernel/src/framebuffer.rs` owns the on-screen pixels. The old text-mode
+driver (`kernel/src/vga.rs` at `0xB8000`) still exists for bring-up banners
+until a bitmap font lands, but it is not what QEMU/v86 display. Same idea
+as before - write to a buffer the BIOS/emulator already renders - one level
+up from characters to pixels.
 
 ## What is already in place (roadmap 5.1)
 
-- Mode set in `boot/boot.asm` (`mov ax, 0x0013` / `int 0x10`) - five bytes;
-  the GDT `align 8` slack absorbs them so the 512-byte sector still fits.
-- `kernel/src/graphics.rs` - `fill_solid` + a serial banner naming mode,
-  resolution, framebuffer address, and fill color.
-
-## Suggested order from here
-
-1. ~~**Switch to a VGA graphics mode.**~~ Done (5.1): Mode 13h + solid fill.
-2. **A pixel/framebuffer drawing module** (`kernel/src/framebuffer.rs` or
-   similar): basic primitives first - set-pixel, fill-rect, blit - then a
-   simple bitmap font renderer for text, since VGA text mode's built-in
-   font goes away once you're in a graphics mode.
+1. **Switch to a VGA graphics mode** - **done (roadmap 5.1)**: Mode 13h via
+   BIOS in `boot/boot.asm`, solid-color fill in `framebuffer.rs`. Stick
+   with Mode 13h for later tasks unless there is a concrete reason to move
+   to VBE (higher res / more colors); Mode 13h is what was verified under
+   both QEMU and v86.
+2. **Pixel/framebuffer drawing primitives** on the existing
+   `kernel/src/framebuffer.rs`: `set_pixel`, `fill_rect`, `draw_line` (and
+   later blit), then a simple bitmap font renderer for text, since VGA text
+   mode's built-in font is gone in graphics mode.
 3. **Mouse input**, via the PS/2 mouse (needs interrupts - see
    `interrupts-and-exceptions` - and follows the same driver conventions as
    `drivers`).

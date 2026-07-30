@@ -36,11 +36,11 @@ if ! grep -q "GOATos booted successfully" "$LOG_FILE"; then
   status=1
 fi
 
-# Graphics mode (roadmap 5.1): the bootloader left Mode 13h and the kernel
-# filled the framebuffer. Serial is the only automated proof; a QEMU
-# screendump / v86 canvas check is still needed for the solid-color claim.
-if ! grep -qE "Graphics: VGA mode 0x13 320x200 @ 0x000a0000, fill color [0-9]+ \(solid\)" "$LOG_FILE"; then
-  echo "FAIL: kernel did not report VGA Mode 13h graphics fill"
+# Graphics mode (roadmap 5.1): bootloader set VGA mode 13h in real mode;
+# the kernel's solid-color fill is the on-screen proof (screenshot/v86),
+# and this banner is the headless stand-in CI can grep.
+if ! grep -qE "Framebuffer: VGA mode 0x13 320x200x256 at 0xa0000, solid fill 0x01" "$LOG_FILE"; then
+  echo "FAIL: kernel did not report the Mode 13h framebuffer solid fill"
   status=1
 fi
 

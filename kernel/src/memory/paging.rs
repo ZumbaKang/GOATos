@@ -5,8 +5,8 @@
 //! moment `CR0.PG` is set the CPU starts translating every fetch and every
 //! load through the tables pointed at by `CR3`, and anything not present in
 //! those tables faults. So the tables have to cover *everything* the kernel
-//! is already using (its own image, both stacks, the VGA buffer, the frame
-//! allocator's pool) *before* that bit flips.
+//! is already using (its own image, both stacks, the VGA framebuffer, the
+//! frame allocator's pool) *before* that bit flips.
 //!
 //! Identity mapping - virtual address == physical address - is the simplest
 //! correct starting point. A higher-half kernel can come later; for now the
@@ -264,11 +264,10 @@ pub fn is_present(virt: u32) -> bool {
 /// page-directory entry boundary.
 ///
 /// Rounding *up* (and mapping the holes under that ceiling, not just the
-/// usable regions) is deliberate: the VGA text buffer at 0xb8000 sits in the
-/// legacy hole below 1 MiB, which no E820 usable region covers, and the
-/// kernel would fault the first time it printed after enabling paging if
-/// that hole were left unmapped. The Mode 13h framebuffer at 0xa0000 is in
-/// the same hole for the same reason.
+/// usable regions) is deliberate: the VGA Mode 13h framebuffer at 0xa0000
+/// and the text buffer at 0xb8000 sit in the legacy hole below 1 MiB, which
+/// no E820 usable region covers, and the kernel would fault the first time
+/// it touched either after enabling paging if that hole were left unmapped.
 fn identity_map_end(map: &MemoryMap) -> u32 {
     let mut end: u64 = 0;
     for region in map.regions().iter().filter(|region| region.is_usable()) {
