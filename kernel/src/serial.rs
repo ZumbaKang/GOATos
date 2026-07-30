@@ -82,11 +82,33 @@ fn send(uart: &mut Uart16550<PioBackend>, bytes: &[u8]) {
                 }
                 hint::spin_loop();
             }
-            // Nobody on the other end is doing hardware flow control, so
-            // waiting for it would never end. Give up on this message.
-            Err(ByteSendError::RemoteNotClearToSend) => return,
+            // Nobody on the other end is doing hardware flow control (v86
+            // never asserts CTS - MSR reads 0x00). The crate's send path
+            // refuses to write in that case, so push one byte straight into
+            // THR: `ready_to_send` already confirmed the holding register is
+            // empty before returning this error. Without this, the browser
+            // demo's serial panel stays blank even though the UART works.
+            Err(ByteSendError::RemoteNotClearToSend) => {
+                // SAFETY: COM1 data port; THR empty was checked above.
+                unsafe { outb(COM1_PORT, remaining[0]) };
+                remaining = &remaining[1..];
+                spins = 0;
+            }
         }
     }
+}
+
+/// Write a byte to an x86 I/O port.
+///
+/// # Safety
+/// `port` must refer to a device register that accepts an 8-bit write.
+unsafe fn outb(port: u16, value: u8) {
+    core::arch::asm!(
+        "out dx, al",
+        in("dx") port,
+        in("al") value,
+        options(nostack, preserves_flags)
+    );
 }
 
 #[doc(hidden)]

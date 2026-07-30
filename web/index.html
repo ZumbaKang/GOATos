@@ -3,99 +3,111 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GOATos - live in your browser</title>
+  <title>GOATos — browser demos</title>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0a0e0a;
-      --fg: #b7ffb7;
-      --accent: #39ff6a;
+      --bg0: #07110c;
+      --bg1: #0e1f16;
+      --fg: #d7ffe0;
+      --muted: #8fb89a;
+      --accent: #3dff7a;
+      --line: rgba(61, 255, 122, 0.28);
     }
+    * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      background: var(--bg);
       color: var(--fg);
-      font-family: "JetBrains Mono", "Fira Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(900px 420px at 10% -10%, rgba(61, 255, 122, 0.16), transparent 60%),
+        radial-gradient(700px 380px at 100% 0%, rgba(80, 160, 255, 0.10), transparent 55%),
+        linear-gradient(160deg, var(--bg0), var(--bg1) 55%, #050a08);
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 2rem 1rem 3rem;
-      box-sizing: border-box;
+      padding: 3rem 1.25rem 4rem;
     }
     h1 {
+      margin: 0;
+      font-family: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
+      font-size: clamp(2.4rem, 6vw, 3.6rem);
+      letter-spacing: 0.12em;
       color: var(--accent);
-      letter-spacing: 0.08em;
-      margin: 0 0 0.25rem;
+      text-transform: uppercase;
     }
-    p.subtitle {
-      margin: 0 0 1.5rem;
-      opacity: 0.75;
-      max-width: 40rem;
+    .lede {
+      margin: 0.75rem 0 2.25rem;
+      max-width: 36rem;
       text-align: center;
+      color: var(--muted);
+      line-height: 1.5;
     }
-    #screen_container {
-      background: #000;
-      border: 2px solid var(--accent);
-      box-shadow: 0 0 24px rgba(57, 255, 106, 0.25);
-      padding: 0;
-      line-height: 0;
+    .links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+      max-width: 44rem;
     }
-    #status {
-      margin-top: 1rem;
-      opacity: 0.8;
-      min-height: 1.2em;
+    a.card {
+      display: block;
+      width: min(20rem, 100%);
+      padding: 1.25rem 1.35rem;
+      border: 1px solid var(--line);
+      background: rgba(0, 0, 0, 0.28);
+      color: inherit;
+      text-decoration: none;
+      transition: border-color 160ms ease, transform 160ms ease;
     }
-    a {
+    a.card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    a.card strong {
+      display: block;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
       color: var(--accent);
+      margin-bottom: 0.4rem;
+      letter-spacing: 0.04em;
+    }
+    a.card span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.45;
     }
     footer {
-      margin-top: 2rem;
-      opacity: 0.6;
-      font-size: 0.85rem;
-      text-align: center;
+      margin-top: 2.5rem;
+      color: var(--muted);
+      font-size: 0.9rem;
     }
+    footer a { color: var(--accent); }
   </style>
 </head>
 <body>
   <h1>GOATos</h1>
-  <p class="subtitle">
-    A from-scratch x86 kernel with its own hand-written bootloader (no GRUB,
-    no BIOS assistance beyond what every PC provides), booting live in your
-    browser via <a href="https://github.com/copy/v86" target="_blank" rel="noopener">v86</a>.
-    No install, no server - this is the exact same disk image QEMU boots for testing.
+  <p class="lede">
+    From-scratch 32-bit x86 OS, same disk image as QEMU, live in the browser
+    via v86. The kernel is in VGA Mode 13h now — open the GUI demo to see the
+    framebuffer.
   </p>
-  <div id="screen_container">
-    <div style="white-space: pre; font: 14px monospace; color: #ccc"></div>
-    <canvas style="display: none"></canvas>
+  <div class="links">
+    <a class="card" href="gui.html">
+      <strong>GUI demo →</strong>
+      <span>
+        Scaled 320×200 Mode 13h canvas plus a live serial log. Use this to
+        test graphics work on GitHub Pages.
+      </span>
+    </a>
+    <a class="card" href="https://github.com/ZumbaKang/GOATos" target="_blank" rel="noopener">
+      <strong>Source on GitHub</strong>
+      <span>Bootloader, kernel, dual roadmaps (core + GUI), and CI automation.</span>
+    </a>
   </div>
-  <div id="status">Loading emulator...</div>
   <footer>
-    <a href="https://github.com/ZumbaKang/GOATos" target="_blank" rel="noopener">Source on GitHub</a>
+    Built by <code>scripts/build-web-demo.sh</code> · deployed via GitHub Pages
   </footer>
-
-  <script src="v86/libv86.js"></script>
-  <script>
-    const status = document.getElementById("status");
-
-    const emulator = new V86({
-      wasm_path: "v86/v86.wasm",
-      screen_container: document.getElementById("screen_container"),
-      bios: { url: "v86/seabios.bin" },
-      vga_bios: { url: "v86/vgabios.bin" },
-      hda: { url: "disk.img" },
-      memory_size: 32 * 1024 * 1024,
-      vga_memory_size: 2 * 1024 * 1024,
-      autostart: true,
-    });
-
-    emulator.add_listener("emulator-started", () => {
-      status.textContent = "Booting GOATos...";
-    });
-
-    emulator.add_listener("emulator-loaded", () => {
-      status.textContent = "";
-    });
-  </script>
 </body>
 </html>

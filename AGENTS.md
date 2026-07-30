@@ -48,9 +48,10 @@ ready" for human PRs and for anything from a fork. That job needs the
 the default `GITHUB_TOKEN` is an app token and cannot take a PR out of draft
 at all; if the secret is missing, the job says so and the PR stays a draft
 (unmerged) instead of failing CI. This is what lets the OS build itself out
-via a scheduled/triggered Cursor Automation picking tasks off `ROADMAP.md` —
+via scheduled/triggered Cursor Automations picking tasks off the dual
+roadmaps (`ROADMAP-CORE.md` / `ROADMAP-GUI.md`, indexed by `ROADMAP.md`) —
 see `.cursor/skills/roadmap-automation/SKILL.md` for the full procedure an
-agent (automated or not) should follow.
+agent (automated or not) should follow (`TRACK=core` or `TRACK=gui`).
 
 Before merging, `auto-merge` also waits for and respects the `Cursor
 Bugbot` GitHub check (`scripts/wait-for-bugbot.sh`) if Bugbot is enabled for
@@ -73,5 +74,6 @@ blocked by it.
   ImageMagick/netpbm are not preinstalled).
 - Web demo: `./scripts/build-web-demo.sh` builds `build/disk.img` and assembles
   a static site in `_site/` (fetches v86 via npm + BIOS blobs via curl — needs
-  network). Serve with `python3 -m http.server -d _site 8080`; the exact same
-  `disk.img` QEMU boots also boots in-browser via v86.
+  network). Serve with `python3 -m http.server -d _site 8080`. Hub is `/`;
+  **GUI/framebuffer testing is `/gui.html`** (scaled Mode 13h canvas + serial
+  log). The exact same `disk.img` QEMU boots also boots in-browser via v86.

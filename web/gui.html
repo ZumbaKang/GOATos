@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GOATos — GUI demo</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070b10;
+      --panel: #0d141c;
+      --fg: #e7eef7;
+      --muted: #8b9bb0;
+      --accent: #5ee1a5;
+      --line: rgba(94, 225, 165, 0.22);
+      /* Mode 13h is 320×200; show it large with crisp pixels. */
+      --scale: 3;
+      --fb-w: 320px;
+      --fb-h: 200px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--fg);
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(800px 360px at 0% 0%, rgba(94, 225, 165, 0.12), transparent 55%),
+        radial-gradient(700px 400px at 100% 10%, rgba(80, 140, 255, 0.10), transparent 50%),
+        var(--bg);
+      padding: 1.5rem 1rem 2.5rem;
+    }
+    header {
+      max-width: 1100px;
+      margin: 0 auto 1.25rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.5rem;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    h1 {
+      margin: 0;
+      font-family: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
+      font-size: 1.65rem;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 38rem;
+      line-height: 1.45;
+      font-size: 0.95rem;
+    }
+    header nav a {
+      color: var(--accent);
+      margin-right: 1rem;
+      font-size: 0.9rem;
+    }
+    .layout {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(0, auto) minmax(16rem, 1fr);
+      gap: 1.25rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      :root { --scale: 2; }
+    }
+    .screen-wrap {
+      border: 1px solid var(--line);
+      background: #000;
+      padding: 0.75rem;
+      width: calc(var(--fb-w) * var(--scale) + 1.5rem);
+      max-width: 100%;
+    }
+    .screen-stage {
+      width: calc(var(--fb-w) * var(--scale));
+      height: calc(var(--fb-h) * var(--scale));
+      overflow: hidden;
+      position: relative;
+      cursor: crosshair;
+    }
+    #screen_container {
+      width: var(--fb-w);
+      height: var(--fb-h);
+      transform: scale(var(--scale));
+      transform-origin: top left;
+      line-height: 0;
+      background: #000;
+    }
+    #screen_container canvas {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    .side {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 0.85rem 1rem;
+    }
+    .panel h2 {
+      margin: 0 0 0.5rem;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.8rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    #status {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      min-height: 1.2em;
+    }
+    #serial_log {
+      margin: 0;
+      height: min(28rem, 55vh);
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font: 12px/1.4 "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
+      color: #c8e6d0;
+      background: #05080c;
+      padding: 0.65rem 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    .hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>GOATos GUI</h1>
+      <p>
+        Live VGA Mode 13h framebuffer (320×200) from the same <code>disk.img</code>
+        QEMU boots. Click the screen to focus keyboard input; serial boot logs
+        stream on the right.
+      </p>
+    </div>
+    <nav>
+      <a href="index.html">← Hub</a>
+      <a href="https://github.com/ZumbaKang/GOATos" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </header>
+
+  <div class="layout">
+    <div class="screen-wrap">
+      <div class="screen-stage" id="screen_stage" title="Click to focus">
+        <div id="screen_container">
+          <div style="white-space: pre; font: 14px monospace; color: #ccc"></div>
+          <canvas style="display: none"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="panel">
+        <h2>Status</h2>
+        <p id="status">Loading emulator…</p>
+        <p class="hint">
+          After Phase 5.1 you should see a solid dark-blue screen. Later GUI
+          tasks draw primitives, text, and windows onto this canvas. Serial
+          mirrors the same boot banners CI greps for in QEMU.
+        </p>
+      </div>
+      <div class="panel">
+        <h2>Serial (COM1)</h2>
+        <pre id="serial_log"></pre>
+      </div>
+    </aside>
+  </div>
+
+  <script src="v86/libv86.js"></script>
+  <script>
+    const status = document.getElementById("status");
+    const serialLog = document.getElementById("serial_log");
+    const screenStage = document.getElementById("screen_stage");
+    const MAX_SERIAL_CHARS = 24000;
+
+    const emulator = new V86({
+      wasm_path: "v86/v86.wasm",
+      screen_container: document.getElementById("screen_container"),
+      bios: { url: "v86/seabios.bin" },
+      vga_bios: { url: "v86/vgabios.bin" },
+      hda: { url: "disk.img" },
+      memory_size: 32 * 1024 * 1024,
+      vga_memory_size: 2 * 1024 * 1024,
+      autostart: true,
+      disable_speaker: true,
+    });
+
+    let serialBuf = "";
+    function appendSerial(ch) {
+      serialBuf += ch;
+      if (serialBuf.length > MAX_SERIAL_CHARS) {
+        serialBuf = serialBuf.slice(serialBuf.length - MAX_SERIAL_CHARS);
+      }
+      serialLog.textContent = serialBuf;
+      serialLog.scrollTop = serialLog.scrollHeight;
+    }
+
+    emulator.add_listener("serial0-output-byte", (byte) => {
+      if (byte === 0x0d) return; // skip CR; keep LF for pre-wrap lines
+      appendSerial(String.fromCharCode(byte));
+    });
+
+    emulator.add_listener("emulator-started", () => {
+      status.textContent = "Booting GOATos…";
+    });
+
+    emulator.add_listener("emulator-loaded", () => {
+      status.textContent = "Running — Mode 13h canvas should be solid blue (5.1).";
+    });
+
+    // Focus keyboard on the emulator when the user clicks the screen.
+    screenStage.addEventListener("click", () => {
+      try {
+        emulator.keyboard_set_status(true);
+      } catch (_) {
+        /* older v86 builds may not expose this helper */
+      }
+      status.textContent = "Screen focused — keyboard goes to the guest.";
+    });
+  </script>
+</body>
+</html>

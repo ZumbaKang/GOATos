@@ -32,9 +32,10 @@ and a "hello world" on screen.
 - [ ] Graphics mode + a basic GUI
 - [ ] ...and much more, one step at a time.
 
-Each of those is a big milestone made of many small steps - see
-[**ROADMAP.md**](ROADMAP.md) for the breakdown of specific, individually
-shippable tasks that lead up to each one.
+Each of those is a big milestone made of many small steps. Tasks are split
+into two parallel tracks so GUI work can move independently of core/terminal
+features — see [**ROADMAP.md**](ROADMAP.md)
+([core](ROADMAP-CORE.md) · [GUI](ROADMAP-GUI.md)).
 
 ## How it works
 
@@ -117,12 +118,15 @@ backend server at all.
                                # site into _site/ (fetches the v86 runtime
                                # via npm; nothing large is committed to git)
 python3 -m http.server -d _site 8080
-# open http://localhost:8080
+# open http://localhost:8080/        — hub
+# open http://localhost:8080/gui.html — Mode 13h canvas (scaled) + serial log
 ```
 
-`web/index.html` is the demo page; `.github/workflows/deploy-pages.yml`
-rebuilds and republishes it to GitHub Pages automatically on every push to
-`main`.
+`web/index.html` is the hub; **`web/gui.html` is the page for testing
+graphics** (3× scaled 320×200 framebuffer plus a live COM1 serial panel).
+`.github/workflows/deploy-pages.yml` rebuilds and republishes the site to
+GitHub Pages on every push to `main` — after deploy, open `…/gui.html` on
+the Pages URL to exercise the GUI the same way.
 
 ## Continuous integration & automated development
 
@@ -134,13 +138,14 @@ passes - PRs on other branch names, and any PR from a fork, are left for
 manual review.
 
 That auto-merge is what makes it possible for GOATos to build itself out
-with minimal supervision: a [Cursor Automation](https://cursor.com/automations)
-can pick up the next task from [`ROADMAP.md`](ROADMAP.md), implement it,
-and open a PR; if CI passes, it merges on its own, and the next run picks
-up the next task. See
+with minimal supervision: **two** [Cursor
+Automations](https://cursor.com/automations) pick tasks from parallel
+tracks ([`ROADMAP-CORE.md`](ROADMAP-CORE.md) and
+[`ROADMAP-GUI.md`](ROADMAP-GUI.md)), each implementing one task per run and
+opening a PR. See
 [`.cursor/skills/roadmap-automation/`](.cursor/skills/roadmap-automation/SKILL.md)
-for the exact procedure (and for how to set the Automation itself up - that
-part happens in the Cursor dashboard, not a repo file).
+for the agent procedure and the exact dashboard prompts (`TRACK=core` /
+`TRACK=gui`).
 
 Before merging, CI also waits for and respects the
 [`Cursor Bugbot`](https://cursor.com/docs/bugbot) check, if Bugbot is
@@ -162,12 +167,7 @@ re-discovering.
 
 ## Next steps
 
-Roughly in order of dependency: interrupts/exceptions, memory management,
-keyboard/timer input, a minimal shell, then a graphics mode + basic GUI.
-See [**ROADMAP.md**](ROADMAP.md) for that broken down into small, specific
-tasks with "done when" criteria, and `.cursor/skills/` for the deeper
-technical guidance behind each phase.
-
-Automations (scheduled/triggered agent runs building out the above) are a
-planned future addition once there's more of the OS built to give them
-useful work to do - see [Cursor Automations](https://cursor.com/automations).
+Core and GUI advance in parallel: shell/FS/scheduling depth in
+[`ROADMAP-CORE.md`](ROADMAP-CORE.md), framebuffer/UI in
+[`ROADMAP-GUI.md`](ROADMAP-GUI.md). See [**ROADMAP.md**](ROADMAP.md) for
+how the tracks fit together, and `.cursor/skills/` for technical guidance.
